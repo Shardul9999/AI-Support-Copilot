@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+groq
+python-dotenv
+pydantic
+
+# Phase 2 — retrieval
+google-genai
+psycopg[binary]
+pgvector
+tiktoken
+
+# Phase 3 — structured output
+instructor
+
+# Phase 4 — hybrid search + rerank
+sentence-transformers

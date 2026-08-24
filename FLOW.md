@@ -12,28 +12,46 @@ A living map of how a request actually moves through the running code — not th
 
 ## Entry points
 
-- `POST /tickets` — `app/main.py:handle_ticket`. Synchronous (no queue yet — that's Phase 5). Takes a `Ticket` (`subject`, `body`), returns `{"reply": str}`.
+- `POST /tickets` — `app/main.py:handle_ticket`. Asynchronous (Phase 5): validates idempotency, inserts a `tickets` row, enqueues a Celery task, returns `202 {"ticket_id", "status": "pending"}` immediately (or `200` with the prior result if the `Idempotency-Key` was already seen).
+- `GET /tickets/{ticket_id}` — `app/main.py:get_ticket`. Polls the `tickets` row for status/resolution.
+- Celery task `app.tasks.process_ticket.process_ticket` — consumes the queue, runs the actual pipeline, writes the result back.
 - `python -m scripts.ingest` — one-off/re-run-on-change CLI, not part of the running app. Populates `knowledge_chunks`.
 
 ## Call graph
 
 ```
 POST /tickets  [app/main.py:handle_ticket]
-  ├─ embed_query(query)                        [app/retrieval/embed.py — Gemini gemini-embedding-001]
-  ├─ vector_search(query_embedding, tenant_id="acme", top_k=20)   [app/retrieval/vector_search.py]
-  │    └─ get_connection()                     [app/db/session.py — psycopg + pgvector]
-  │    └─ SELECT ... ORDER BY embedding <=> %s::vector LIMIT 20   (cosine distance, tenant_id-filtered)
-  ├─ keyword_search(query, tenant_id="acme", top_k=20)   [app/retrieval/keyword_search.py]
-  │    └─ SELECT ... WHERE search_vector @@ plainto_tsquery(...) ORDER BY ts_rank_cd(...) LIMIT 20
-  ├─ reciprocal_rank_fusion(semantic, keyword, top_k=20)   [app/retrieval/fuse.py]
-  ├─ rerank(query, fused, top_k=5)   [app/retrieval/rerank.py — local CrossEncoder, ms-marco-MiniLM-L-6-v2]
-  ├─ context = top-5 reranked chunks joined, each tagged "[chunk_id=N] ..."
-  ├─ structured_client.chat.completions.create(..., response_model=SupportResolution)   [Groq call via instructor]
-  ├─ filter resolution.citations to ids actually in retrieved_ids
-  ├─ if confidence < 0.72 and action == "resolve": force action = "escalate"
-  ├─ if action != "resolve" and answer is empty: substitute fallback holding message
-  └─ return resolution   (FastAPI serializes the SupportResolution model to JSON)
-       (still unhandled: any Groq/instructor exception still bubbles up as a raw 500 — noted in Phase 1, not yet fixed; instructor's validation-retry happens before this point, so this is only unrecovered *provider* errors, not malformed-output errors)
+  ├─ get_connection()                           [app/db/session.py]
+  ├─ SELECT id, status, resolution FROM tickets WHERE tenant_id=... AND idempotency_key=...
+  │    └─ if found: return existing row as-is, 200 — do NOT re-enqueue
+  ├─ INSERT INTO tickets (...) RETURNING id      (only if idempotency_key not seen before)
+  ├─ process_ticket.delay(ticket_id)             [app/tasks/process_ticket.py — enqueues onto Redis/Upstash]
+  └─ return {"ticket_id", "status": "pending"}, 202
+
+GET /tickets/{ticket_id}  [app/main.py:get_ticket]
+  ├─ SELECT status, resolution FROM tickets WHERE id=... AND tenant_id=...
+  └─ 404 if not found, else {"ticket_id", "status", "resolution"}
+
+process_ticket(ticket_id)  [app/tasks/process_ticket.py — Celery worker, bind=True, task_acks_late=True,
+                             max_retries=3, default_retry_delay=60, time_limit=120 (prefork-only, see DECISIONS.md)]
+  ├─ SELECT tenant_id, subject, body FROM tickets WHERE id=ticket_id
+  ├─ resolve_ticket(subject, body, tenant_id)     [app/pipeline.py — the actual RAG pipeline, shared logic]
+  │    ├─ embed_query(query)                                    [app/retrieval/embed.py — Gemini gemini-embedding-001]
+  │    ├─ vector_search(query_embedding, tenant_id, top_k=20)   [app/retrieval/vector_search.py]
+  │    │    └─ SELECT ... ORDER BY embedding <=> %s::vector LIMIT 20   (cosine distance, tenant_id-filtered)
+  │    ├─ keyword_search(query, tenant_id, top_k=20)            [app/retrieval/keyword_search.py]
+  │    │    └─ SELECT ... WHERE search_vector @@ plainto_tsquery(...) ORDER BY ts_rank_cd(...) LIMIT 20
+  │    ├─ reciprocal_rank_fusion(semantic, keyword, top_k=20)   [app/retrieval/fuse.py]
+  │    ├─ rerank(query, fused, top_k=5)                         [app/retrieval/rerank.py — local CrossEncoder]
+  │    ├─ context = top-5 reranked chunks joined, each tagged "[chunk_id=N] ..."
+  │    ├─ structured_client.chat.completions.create(..., response_model=SupportResolution)   [Groq call via instructor]
+  │    ├─ filter resolution.citations to ids actually in retrieved_ids
+  │    ├─ if confidence < 0.72 and action == "resolve": force action = "escalate"
+  │    └─ if action != "resolve" and answer is empty: substitute fallback holding message
+  └─ UPDATE tickets SET status=resolution.action, resolution=<json>, updated_at=now() WHERE id=ticket_id
+       (still unhandled: a Groq/instructor exception here is caught by `autoretry_for=(Exception,)` and retried up
+       to 3 times at 60s intervals, then gives up silently — a permanently-failing ticket is left `status="pending"`
+       forever with no operator-visible signal; noted in Phase 1 for the sync path, still true for the async one)
 
 python -m scripts.ingest  [scripts/ingest.py:ingest]
   ├─ DELETE FROM knowledge_chunks   (wipe before reload)
@@ -109,3 +127,14 @@ python -m scripts.ingest  [scripts/ingest.py:ingest]
   - `evals/retrieval_eval.py` → **15/15 (100%) for both vector-only and hybrid+rerank, at both k=1 and k=5.** No measurable difference between the two methods on this 6-document corpus — a ceiling effect, not evidence the hybrid implementation doesn't matter. See DECISIONS.md for the full reasoning; the honest claim is "correctly implemented," not "measurably better here."
   - Full `/tickets` endpoint re-tested live with the new pipeline wired in (`error TXN_4471` question) → `citations=[7]` (the `error_codes.md` chunk), `confidence=0.99`, `action="resolve"`, answer correctly matches that doc's TXN_4471 entry. Confirms hybrid+rerank didn't regress anything from Phase 3.
   - Minor tooling note, not a code bug: uvicorn's own startup log line intermittently didn't appear in redirected log files during this session's testing (buffering/timing quirk with this shell setup), even though the server was actually up and listening (`netstat` confirmed port 8000 bound) — worth remembering so a quiet log file isn't mistaken for a failed start next time; check the port/process directly if a log looks stuck.
+
+### Session: 2026-08-24 — Phase 5 verification (code from 2026-08-21 session, verified live this session)
+- Applied `app/db/schema.sql`'s `tickets` table to the live Supabase DB — it had been written but never actually run there.
+- `app/tasks/celery_app.py` — fixed two real startup bugs found by actually running a worker instead of assuming the code worked: (1) `autodiscover_tasks(["app.tasks"])` never finds `process_ticket.py` (Django-convention helper, looks for `tasks.py`) — swapped for explicit `include=["app.tasks.process_ticket"]`; (2) Upstash's `rediss://` URL needs `ssl_cert_reqs` spelled out explicitly or the worker crashes on startup — added `broker_use_ssl`/`redis_backend_use_ssl`. Also added `broker_transport_options={"visibility_timeout": 130}` — see DECISIONS.md, this one changes actual redelivery behavior, not just startup.
+- Windows forces `--pool=solo` (no prefork) — noted as the reason two of the day's demo goals split into "verified" vs. "found a real gap," not a code change.
+- **Live results:**
+  - Full async path (`POST /tickets` → `202` → Celery → `resolve_ticket` → DB update → `GET /tickets/{id}`) — submitted a refund question, a Nepal-shipping-style question, and a TXN_4471 error-code question; all resolved correctly with citations matching the right source doc.
+  - Idempotency — two `POST /tickets` with the same `Idempotency-Key` produced exactly one `tickets` row and one enqueued task (confirmed via direct Postgres query and celery log `received` count), second request returned the first's state instead of re-processing.
+  - Worker-crash redelivery — killed the worker ~2s into a task (mid-embedding call), confirmed the message sat in Redis's `unacked` hash and the ticket stayed `"status":"pending"`, restarted the worker, confirmed the *same task UUID* was re-received and completed successfully. Required the `visibility_timeout` fix above — without it, this would not have happened within any reasonable wait (Celery's redis-transport default is 3600s).
+  - Hard `time_limit` under `--pool=solo` — **not enforced**. A throwaway task (`sleep(30)`, `time_limit=5`) ran to full completion instead of being killed at 5s. Documented in DECISIONS.md as a real, undeployed-yet gap rather than papered over; `time_limit=120` in `process_ticket.py` is left as-is since it'll work correctly once the worker runs on a Linux/prefork host.
+- Both FastAPI and the Celery worker left running in the background (`nohup`, detached) after verification, for continued local testing.

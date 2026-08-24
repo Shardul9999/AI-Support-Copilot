@@ -66,6 +66,19 @@ Q5: The eval came back 15/15 for both vector-only and hybrid+rerank, at both k=1
 
 **Result**: PENDING — same consolidated review as Phase 1-3.
 
+## [2026-08-24] Check after: Phase 5 (async queue — Celery + Redis) — **DEFERRED**
+**Covers**: `app/pipeline.py`, `app/tasks/celery_app.py`, `app/tasks/process_ticket.py`, `app/main.py` (async `POST /tickets` + `GET /tickets/{id}`), `app/db/schema.sql` (`tickets` table) — see DECISIONS.md + FLOW.md session "2026-08-24 — Phase 5 verification".
+
+**Status**: also deferred, same reason. Unlike some earlier phases, this one has two findings that are load-bearing for the Day 4 demo goal in ONE_WEEK_PLAN.md, not just background trivia — worth reading DECISIONS.md's two `visibility_timeout` / `time_limit` entries before answering Q3/Q4 below.
+
+Q1: `task_acks_late=True` alone was not enough to make worker-crash redelivery actually happen quickly. What second setting was missing, what does it control, and why was it set to `120 + buffer` specifically rather than some other number?
+Q2: Trace exactly why `autodiscover_tasks(["app.tasks"])` registered zero tasks even though the worker started without error. What convention was it assuming that this repo doesn't follow?
+Q3: `time_limit=5` was set on a task that slept for 30s, and the task still ran to completion. Why? What specific OS-level mechanism is missing on Windows that this depends on?
+Q4: Given Q3's answer, is `time_limit=120` on `process_ticket` currently a real safety net, decorative, or something in between? What would have to change (which pool, which platform) for it to become real?
+Q5: Idempotency dedup happens by checking `idempotency_key` before the `INSERT`. What's the actual failure mode this prevents on the *webhook sender's* side (not the code's), and why does the check need to happen before enqueueing rather than inside the Celery task?
+
+**Result**: PENDING — same consolidated review as Phase 1-4.
+
 ### Entry template
 ```
 ## [YYYY-MM-DD] Check after: <phase/change>

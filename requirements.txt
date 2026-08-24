@@ -15,3 +15,7 @@ instructor
 
 # Phase 4 — hybrid search + rerank
 sentence-transformers
+
+# Phase 5 — queue
+celery
+redis

@@ -234,4 +234,37 @@ Chronological log of implementation decisions made while building the AI Support
 
 ---
 
-*(Further entries land as coding continues into Phase 5 onward.)*
+### [2026-08-24] Bug fix: `autodiscover_tasks(["app.tasks"])` never actually found `process_ticket`
+- **Phase**: 5
+- **Decision**: replaced `celery_app.autodiscover_tasks(["app.tasks"])` with an explicit `include=["app.tasks.process_ticket"]` in the `Celery(...)` constructor.
+- **Reasoning**: `autodiscover_tasks` is a Django-convention helper — for each package name given, it imports `<package>.tasks`. The actual task lives in `app/tasks/process_ticket.py`, not `app/tasks/tasks.py`, so the worker started successfully but registered zero tasks (`celery inspect registered` came back empty). Found by actually starting a worker and inspecting its registered-task list rather than assuming the call worked because it didn't error. `include=` is the more direct mechanism for a non-Django layout and doesn't depend on a filename convention.
+- **Files affected**: `app/tasks/celery_app.py`.
+
+### [2026-08-24] Bug fix: Upstash's `rediss://` URL needs explicit `ssl_cert_reqs`
+- **Phase**: 5
+- **Decision**: added `broker_use_ssl={"ssl_cert_reqs": ssl.CERT_REQUIRED}` and `redis_backend_use_ssl={"ssl_cert_reqs": ssl.CERT_REQUIRED}` to `celery_app.conf`.
+- **Reasoning**: the worker crashed immediately on startup (`ValueError: A rediss:// URL must have parameter ssl_cert_reqs...`) — Celery's redis backend refuses to build a TLS connection without this being spelled out, even though the URL scheme alone (`rediss://`) already implies TLS. `CERT_REQUIRED` works because Upstash presents a publicly-trusted certificate; no need to relax to `CERT_NONE`.
+- **Files affected**: `app/tasks/celery_app.py`.
+
+### [2026-08-24] `broker_transport_options={"visibility_timeout": 130}` — the default (1 hour) would have silently defeated the worker-crash-redelivery design
+- **Phase**: 5
+- **Decision**: set the redis transport's `visibility_timeout` to 130s (`time_limit=120` + a small buffer), instead of leaving Celery's default of 3600s.
+- **Reasoning**: found by live-testing the exact scenario BUILD_PLAN.md/ONE_WEEK_PLAN.md's Day 4 demo goal calls for — kill a worker mid-task and confirm redelivery. With `task_acks_late=True` but no `visibility_timeout` override, the in-flight message sat in Redis's `unacked` hash indefinitely; restarting the worker did **not** trigger immediate redelivery (kombu's redis transport only restores unacked messages once `visibility_timeout` elapses, checked via a periodic timer at roughly `visibility_timeout/2`). Left at the 3600s default, a crashed worker's ticket would have looked "stuck forever" for up to an hour — defeating the entire point of `task_acks_late`. Setting it just above `time_limit` keeps the two numbers coupled on purpose: a task that's still legitimately running (under 120s) must never be redelivered out from under itself, but a genuinely dead worker's task now recovers in roughly a couple of minutes instead of up to an hour.
+- **Verified live**: submitted a ticket, killed `-9`'d the worker ~2s after it received the task (mid-embedding), confirmed via direct Redis inspection (`HLEN unacked` = 1, ticket stayed `"status":"pending"`), restarted the worker, and watched the *same task UUID* get re-received and complete successfully once the visibility window elapsed. Exactly one final DB row/resolution — no duplicate side effects, matching the intent of `task_acks_late`.
+- **Files affected**: `app/tasks/celery_app.py`.
+
+### [2026-08-24] Discovered, not fixed: `time_limit=120` is a no-op under `--pool=solo`, which Windows forces
+- **Phase**: 5
+- **What was found**: Celery's hard `time_limit` is enforced by the **prefork** pool killing the worker's child process at the deadline. Prefork isn't available on Windows, so the worker must run with `--pool=solo` (single process, no subprocess to kill). Verified directly: a throwaway task (`time.sleep(30)`, decorated with `time_limit=5`) was submitted and ran to full completion in ~31.8s, returning its value normally — no `TimeLimitExceeded`, no interruption. `worker_prefetch_multiplier=1` + solo pool also means a genuinely hung task blocks that single worker from picking up *any* other ticket for the entire hang duration, not just the one task.
+- **Why not fixed now**: fixing this properly means either (a) deploying the worker on Linux/Docker for a real prefork pool — the actual intended production target, matching the free-hosted-infra pattern already used for Postgres/Redis — or (b) an application-level timeout inside `resolve_ticket`/`process_ticket` itself (e.g. running the pipeline in a helper thread and enforcing a deadline with `concurrent.futures.Future.result(timeout=...)`), which adds real complexity for a problem that's specific to local Windows dev, not the deployed system.
+- **Decision for now**: leave `time_limit=120` in the code as documentation of intent and as something that *will* work correctly once deployed to a Linux host with `--pool=prefork` (the default there) — but don't claim it's an active safety net while developing on Windows with `--pool=solo`. Noted here so this isn't mistaken for "verified" the way the redelivery test above genuinely was.
+- **Files affected**: none (finding, not a code change) — `app/tasks/process_ticket.py`'s `time_limit=120` is unchanged.
+
+### [2026-08-24] Phase 5 end-to-end verification — live, not simulated
+- **Phase**: 5
+- **What was actually run**: applied the `tickets` table migration to the live Supabase DB (it had never actually been run there, despite `schema.sql` already having the table defined from the Phase 5 coding session). Started a real FastAPI server and a real Celery worker (`--pool=solo`, against live Upstash Redis) and: (1) submitted a ticket through the full `POST /tickets` → `202` → worker → `resolve_ticket` → DB update → `GET /tickets/{id}` path, got back a correct, citation-backed answer; (2) sent two requests with the same `Idempotency-Key`, confirmed only one row/task was created and the second request returned the first's (in-progress, then final) state without re-enqueuing; (3) killed the worker mid-task and confirmed redelivery (see the `visibility_timeout` entry above); (4) found and documented that `time_limit` doesn't actually fire under the Windows-forced `--pool=solo` (see the entry above).
+- **Files affected**: none (verification record only) — see FLOW.md's session log for the full sequence.
+
+---
+
+*(Further entries land as coding continues into Phase 6 onward.)*

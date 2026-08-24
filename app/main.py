@@ -1,79 +1,70 @@
 # app/main.py  —  pip install -r requirements.txt
+import uuid
+
 from dotenv import load_dotenv
 
 load_dotenv()  # must run before any app-local import that reads env vars at module load time (embed.py, session.py)
 
-import instructor
-from fastapi import FastAPI
-from groq import Groq
+from fastapi import FastAPI, Header, HTTPException, Response
 
-from app.models import SupportResolution, Ticket
-from app.retrieval.embed import embed_query
-from app.retrieval.fuse import reciprocal_rank_fusion
-from app.retrieval.keyword_search import keyword_search
-from app.retrieval.rerank import rerank
-from app.retrieval.vector_search import vector_search
+from app.db.session import get_connection
+from app.models import Ticket
+from app.tasks.process_ticket import process_ticket
 
 app = FastAPI()
-client = Groq()  # reads GROQ_API_KEY from env
-structured_client = instructor.from_groq(client, mode=instructor.Mode.TOOLS)
 
-MODEL = "openai/gpt-oss-120b"
 DEFAULT_TENANT = "acme"  # single-tenant placeholder until Phase 7 makes this per-request
-CONFIDENCE_THRESHOLD = 0.72
 
 
 @app.post("/tickets")
-def handle_ticket(ticket: Ticket) -> SupportResolution:
-    query = f"{ticket.subject}\n\n{ticket.body}"
+def handle_ticket(
+    ticket: Ticket,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    idempotency_key = idempotency_key or str(uuid.uuid4())
 
-    query_embedding = embed_query(query)
-    semantic = vector_search(query_embedding, tenant_id=DEFAULT_TENANT, top_k=20)
-    keyword = keyword_search(query, tenant_id=DEFAULT_TENANT, top_k=20)
-    fused = reciprocal_rank_fusion(semantic, keyword, top_k=20)
-    chunks = rerank(query, fused, top_k=5)
-    context = "\n\n---\n\n".join(f"[chunk_id={c['id']}] {c['content']}" for c in chunks)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, status, resolution FROM tickets WHERE tenant_id = %s AND idempotency_key = %s",
+                (DEFAULT_TENANT, idempotency_key),
+            )
+            existing = cur.fetchone()
 
-    resolution = structured_client.chat.completions.create(
-        model=MODEL,
-        max_tokens=500,
-        response_model=SupportResolution,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a support agent for Acme. Answer only from these excerpts, "
-                    "each tagged with a chunk_id. Cite the chunk_id(s) you actually used "
-                    "in `citations`. If the excerpts don't contain the answer, set action "
-                    "to 'escalate' or 'need_info' and explain why in escalation_reason, "
-                    "rather than guessing.\n\n" + context
-                ),
-            },
-            {"role": "user", "content": query},
-        ],
-    )
+            if existing:
+                # Same idempotency key seen before — a repeat webhook delivery.
+                # Return the original result instead of re-queuing the work.
+                response.status_code = 200
+                return {"ticket_id": existing[0], "status": existing[1], "resolution": existing[2]}
 
-    # Citations are only trustworthy if they point at chunks we actually retrieved —
-    # a model can still name an id that wasn't in context.
-    retrieved_ids = {c["id"] for c in chunks}
-    resolution.citations = [cid for cid in resolution.citations if cid in retrieved_ids]
+            cur.execute(
+                """
+                INSERT INTO tickets (tenant_id, idempotency_key, subject, body)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (DEFAULT_TENANT, idempotency_key, ticket.subject, ticket.body),
+            )
+            ticket_id = cur.fetchone()[0]
 
-    # Threshold is a safety net independent of the model's own judgment: even if it
-    # said "resolve", low self-reported confidence forces a human in the loop.
-    if resolution.confidence < CONFIDENCE_THRESHOLD and resolution.action == "resolve":
-        resolution.action = "escalate"
-        resolution.escalation_reason = (
-            resolution.escalation_reason
-            or f"Confidence {resolution.confidence:.2f} below {CONFIDENCE_THRESHOLD} threshold"
-        )
+    process_ticket.delay(ticket_id)
 
-    # The model sometimes leaves `answer` empty when it escalates instead of resolving
-    # (defensible — it's declining to fabricate a substantive response) but an empty
-    # string is a worse customer-facing message than an honest holding reply.
-    if resolution.action != "resolve" and not resolution.answer.strip():
-        resolution.answer = (
-            "Thanks for reaching out — this has been forwarded to a specialist "
-            "who will follow up with you shortly."
-        )
+    response.status_code = 202
+    return {"ticket_id": ticket_id, "status": "pending"}
 
-    return resolution
+
+@app.get("/tickets/{ticket_id}")
+def get_ticket(ticket_id: int):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, resolution FROM tickets WHERE id = %s AND tenant_id = %s",
+                (ticket_id, DEFAULT_TENANT),
+            )
+            row = cur.fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+
+    return {"ticket_id": ticket_id, "status": row[0], "resolution": row[1]}

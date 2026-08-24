@@ -5,6 +5,7 @@ this logic lives, not one copy per caller."""
 import instructor
 from groq import Groq
 
+from app.cache import semantic_cache
 from app.models import SupportResolution
 from app.retrieval.embed import embed_query
 from app.retrieval.fuse import reciprocal_rank_fusion
@@ -23,6 +24,11 @@ def resolve_ticket(subject: str, body: str, tenant_id: str) -> SupportResolution
     query = f"{subject}\n\n{body}"
 
     query_embedding = embed_query(query)
+
+    cached = semantic_cache.lookup(query_embedding, tenant_id)
+    if cached is not None:
+        return SupportResolution(**cached)
+
     semantic = vector_search(query_embedding, tenant_id=tenant_id, top_k=20)
     keyword = keyword_search(query, tenant_id=tenant_id, top_k=20)
     fused = reciprocal_rank_fusion(semantic, keyword, top_k=20)
@@ -70,5 +76,14 @@ def resolve_ticket(subject: str, body: str, tenant_id: str) -> SupportResolution
             "Thanks for reaching out — this has been forwarded to a specialist "
             "who will follow up with you shortly."
         )
+
+    # Never cache an escalation/need_info or a low-confidence result: a false cache hit
+    # hands back a wrong answer with no model in the loop to catch it next time, so only
+    # results that already cleared the confidence bar above are eligible at all. (The
+    # action == "resolve" check is partly redundant with the override above — resolve
+    # implies confidence >= CONFIDENCE_THRESHOLD already — kept explicit anyway so this
+    # stays correct even if that override's logic ever changes independently.)
+    if resolution.action == "resolve" and resolution.confidence >= CONFIDENCE_THRESHOLD:
+        semantic_cache.store(query, query_embedding, tenant_id, resolution.model_dump())
 
     return resolution

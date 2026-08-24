@@ -36,10 +36,13 @@ def _ssl_kwargs() -> dict:
     return {}
 
 
-def publish_ticket_update(ticket_id: int, status: str, resolution: dict) -> None:
+def publish_ticket_update(ticket_id: int, status: str, resolution: dict, request_id: str) -> None:
     client = redis.Redis.from_url(os.environ["REDIS_URL"], **_ssl_kwargs())
     try:
-        client.publish(CHANNEL, json.dumps({"ticket_id": ticket_id, "status": status, "resolution": resolution}))
+        client.publish(
+            CHANNEL,
+            json.dumps({"ticket_id": ticket_id, "status": status, "resolution": resolution, "request_id": request_id}),
+        )
     finally:
         client.close()
 

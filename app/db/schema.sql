@@ -57,6 +57,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS tickets_tenant_idempotency_key
 CREATE INDEX IF NOT EXISTS tickets_tenant_id
     ON tickets (tenant_id);
 
+CREATE TABLE IF NOT EXISTS semantic_cache (
+    id              BIGSERIAL PRIMARY KEY,
+    tenant_id       TEXT NOT NULL,
+    query_text      TEXT NOT NULL,          -- the embedded query, kept for debugging/inspection only — never matched on directly
+    query_embedding VECTOR(768) NOT NULL,
+    response        JSONB NOT NULL,         -- the full cached SupportResolution
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at      TIMESTAMPTZ NOT NULL DEFAULT now() + interval '24 hours'
+);
+
+-- No dedicated ANN index (HNSW/IVFFlat): this table stays small (only high-confidence
+-- `resolve` results get cached — see app/pipeline.py) relative to knowledge_chunks, so
+-- an unindexed <=> scan per lookup is fine, same reasoning as the earlier semantic-cache
+-- pgvector decision in DECISIONS.md. Revisit if cache row count ever gets large.
+CREATE INDEX IF NOT EXISTS semantic_cache_tenant_id
+    ON semantic_cache (tenant_id);
+
+CREATE INDEX IF NOT EXISTS semantic_cache_expires_at
+    ON semantic_cache (expires_at);
+
 -- Phase 7: Row-Level Security. The Supabase-provided `postgres` role this schema is
 -- applied as has rolbypassrls = true (confirmed live: SELECT rolbypassrls FROM
 -- pg_roles WHERE rolname = current_user), so every policy below is a deliberate
@@ -81,5 +101,15 @@ ALTER TABLE tickets FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS tenant_isolation ON tickets;
 CREATE POLICY tenant_isolation ON tickets
+    USING (tenant_id = current_setting('app.current_tenant', true))
+    WITH CHECK (tenant_id = current_setting('app.current_tenant', true));
+
+-- Phase 8: semantic_cache holds cached ticket resolutions, which can carry customer
+-- PII from the original ticket body — same tenant-isolation stakes as tickets itself.
+ALTER TABLE semantic_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE semantic_cache FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON semantic_cache;
+CREATE POLICY tenant_isolation ON semantic_cache
     USING (tenant_id = current_setting('app.current_tenant', true))
     WITH CHECK (tenant_id = current_setting('app.current_tenant', true));

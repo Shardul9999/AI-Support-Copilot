@@ -1,6 +1,8 @@
 """Phase 2 ingestion: reads data/kb/*.md, chunks each file, embeds each chunk
 via Gemini, inserts into knowledge_chunks. Re-run whenever the doc set changes
-(wipes and reloads for now — real invalidation is Phase 8's job).
+(wipes and reloads for now). Also wipes semantic_cache (Phase 8) — any cached
+resolution could have been generated from a document version that no longer
+exists, so a KB reload has to invalidate the whole cache, not just the KB.
 
 Run from the repo root: python -m scripts.ingest
 """
@@ -26,6 +28,7 @@ def ingest():
     with conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM knowledge_chunks")
+            cur.execute("DELETE FROM semantic_cache")
             total = 0
             for path in sorted(glob.glob(os.path.join(DOCS_DIR, "*.md"))):
                 source = os.path.basename(path)

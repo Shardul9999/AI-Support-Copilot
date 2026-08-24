@@ -25,3 +25,7 @@ websockets
 
 # Phase 7 — multi-tenancy + RLS
 pytest
+
+# Phase 9 — observability + evals
+opentelemetry-api
+opentelemetry-sdk

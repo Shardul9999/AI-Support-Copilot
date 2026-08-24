@@ -14,6 +14,10 @@ from app.models import Ticket
 from app.realtime import connections
 from app.realtime.pubsub import subscribe_forever
 from app.tasks.process_ticket import process_ticket
+from app.telemetry.tracing import get_tracer, log_event, new_request_id, setup_tracing
+
+setup_tracing("api")
+tracer = get_tracer()
 
 DEFAULT_TENANT = "acme"  # default when a caller doesn't send X-Tenant-ID — keeps pre-Phase-7 demo commands working
 HEARTBEAT_INTERVAL = 30  # seconds between pings while a ticket is still pending
@@ -51,40 +55,50 @@ def handle_ticket(
     response: Response,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID"),
+    request_id: str = Header(default=None, alias="X-Request-ID"),
 ):
+    request_id = request_id or new_request_id()
     idempotency_key = idempotency_key or str(uuid.uuid4())
+    response.headers["X-Request-ID"] = request_id
 
-    with get_connection(tenant_id) as conn:
-        with conn.cursor() as cur:
-            if not _tenant_exists(cur, tenant_id):
-                raise HTTPException(status_code=400, detail=f"unknown tenant: {tenant_id!r}")
+    with tracer.start_as_current_span("handle_ticket") as span:
+        span.set_attribute("request_id", request_id)
+        span.set_attribute("tenant_id", tenant_id)
+        log_event("ticket_received", request_id, tenant_id=tenant_id)
 
-            cur.execute(
-                "SELECT id, status, resolution FROM tickets WHERE tenant_id = %s AND idempotency_key = %s",
-                (tenant_id, idempotency_key),
-            )
-            existing = cur.fetchone()
+        with get_connection(tenant_id) as conn:
+            with conn.cursor() as cur:
+                if not _tenant_exists(cur, tenant_id):
+                    raise HTTPException(status_code=400, detail=f"unknown tenant: {tenant_id!r}")
 
-            if existing:
-                # Same idempotency key seen before — a repeat webhook delivery.
-                # Return the original result instead of re-queuing the work.
-                response.status_code = 200
-                return {"ticket_id": existing[0], "status": existing[1], "resolution": existing[2]}
+                cur.execute(
+                    "SELECT id, status, resolution FROM tickets WHERE tenant_id = %s AND idempotency_key = %s",
+                    (tenant_id, idempotency_key),
+                )
+                existing = cur.fetchone()
 
-            cur.execute(
-                """
-                INSERT INTO tickets (tenant_id, idempotency_key, subject, body)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id
-                """,
-                (tenant_id, idempotency_key, ticket.subject, ticket.body),
-            )
-            ticket_id = cur.fetchone()[0]
+                if existing:
+                    # Same idempotency key seen before — a repeat webhook delivery.
+                    # Return the original result instead of re-queuing the work.
+                    response.status_code = 200
+                    return {"ticket_id": existing[0], "status": existing[1], "resolution": existing[2]}
 
-    process_ticket.delay(ticket_id, tenant_id)
+                cur.execute(
+                    """
+                    INSERT INTO tickets (tenant_id, idempotency_key, subject, body)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (tenant_id, idempotency_key, ticket.subject, ticket.body),
+                )
+                ticket_id = cur.fetchone()[0]
+
+        span.set_attribute("ticket_id", ticket_id)
+        log_event("ticket_enqueued", request_id, ticket_id=ticket_id, tenant_id=tenant_id)
+        process_ticket.delay(ticket_id, tenant_id, request_id)
 
     response.status_code = 202
-    return {"ticket_id": ticket_id, "status": "pending"}
+    return {"ticket_id": ticket_id, "status": "pending", "request_id": request_id}
 
 
 @app.get("/tickets/{ticket_id}")
@@ -149,6 +163,14 @@ async def watch_ticket(websocket: WebSocket, ticket_id: int):
 
             if update in done:
                 message = update.result()
+                # request_id is only present on a genuine live pub/sub delivery (see
+                # app/tasks/process_ticket.py) — the "already resolved before connect"
+                # immediate-push path (below) has no live cross-process hop to trace.
+                if message.get("request_id"):
+                    with tracer.start_as_current_span("websocket_push") as span:
+                        span.set_attribute("request_id", message["request_id"])
+                        span.set_attribute("ticket_id", ticket_id)
+                        log_event("websocket_push", message["request_id"], ticket_id=ticket_id, status=message.get("status"))
                 await websocket.send_json(message)
                 if message.get("status") != "pending":
                     break  # terminal state delivered — this ticket has nothing further to push

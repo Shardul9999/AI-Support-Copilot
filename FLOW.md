@@ -20,19 +20,24 @@ A living map of how a request actually moves through the running code — not th
 - `python -m scripts.apply_schema` (Phase 7) — one-off CLI. Applies `app/db/schema.sql` to `DATABASE_URL`; idempotent, safe to re-run every phase that touches the schema.
 - `python -m scripts.setup_app_role` (Phase 7) — one-off/rotate-on-demand CLI. Creates/rotates the restricted `app_role` Postgres role the running app connects as; writes `APP_DATABASE_URL` into `.env`.
 - `python -m scripts.watch_ticket <id> [ws://host:port] [tenant_id]` — demo CLI client for the websocket route, not part of the running app.
+- `python -m pytest tests/test_semantic_cache.py` (Phase 8) — not an entry point, but note it makes real Groq/Gemini calls (one full `resolve_ticket()` invocation) — not free/instant to run.
+- `python -m pytest evals/test_eval.py` (Phase 9) — the accuracy gate: 18 golden-set cases, each a real `resolve_ticket()` call. Takes several minutes; not free/instant.
 
 ## Call graph
 
 ```
 POST /tickets  [app/main.py:handle_ticket]
   ├─ tenant_id = X-Tenant-ID header, default "acme"
+  ├─ request_id = X-Request-ID header, else new_request_id()   [app/telemetry/tracing.py — Phase 9]
+  ├─ span "handle_ticket" {request_id, tenant_id, ticket_id}; log_event("ticket_received", ...)
   ├─ get_connection(tenant_id)                   [app/db/session.py — app_role connection; SET LOCAL-equivalent via set_config()]
   ├─ _tenant_exists(cur, tenant_id)               → SELECT 1 FROM tenants WHERE slug=...; 400 if unknown
   ├─ SELECT id, status, resolution FROM tickets WHERE tenant_id=... AND idempotency_key=...
   │    └─ if found: return existing row as-is, 200 — do NOT re-enqueue
   ├─ INSERT INTO tickets (...) RETURNING id      (only if idempotency_key not seen before)
-  ├─ process_ticket.delay(ticket_id, tenant_id)  [app/tasks/process_ticket.py — enqueues onto Redis/Upstash]
-  └─ return {"ticket_id", "status": "pending"}, 202
+  ├─ log_event("ticket_enqueued", request_id, ticket_id, tenant_id)
+  ├─ process_ticket.delay(ticket_id, tenant_id, request_id)  [app/tasks/process_ticket.py — enqueues onto Redis/Upstash]
+  └─ return {"ticket_id", "status": "pending", "request_id"}, 202   (X-Request-ID also set as a response header)
 
 GET /tickets/{ticket_id}  [app/main.py:get_ticket]
   ├─ tenant_id = X-Tenant-ID header, default "acme"
@@ -42,11 +47,15 @@ GET /tickets/{ticket_id}  [app/main.py:get_ticket]
        (RLS means "not found" also covers "belongs to a different tenant" — the two are
        indistinguishable from the caller's side, on purpose, same as any well-behaved 404)
 
-process_ticket(ticket_id, tenant_id)  [app/tasks/process_ticket.py — Celery worker, bind=True, task_acks_late=True,
+process_ticket(ticket_id, tenant_id, request_id)  [app/tasks/process_ticket.py — Celery worker, bind=True, task_acks_late=True,
                              max_retries=3, default_retry_delay=60, time_limit=120 (prefork-only, see DECISIONS.md)]
+  ├─ span "process_ticket" {request_id, ticket_id, tenant_id}; log_event("task_started", ...)
   ├─ get_connection(tenant_id); SELECT subject, body FROM tickets WHERE id=... AND tenant_id=...
   ├─ resolve_ticket(subject, body, tenant_id)     [app/pipeline.py — the actual RAG pipeline, shared logic]
   │    ├─ embed_query(query)                                    [app/retrieval/embed.py — Gemini gemini-embedding-001]
+  │    ├─ semantic_cache.lookup(query_embedding, tenant_id)      [app/cache/semantic_cache.py — Phase 8]
+  │    │    └─ SELECT response WHERE tenant_id=... AND expires_at>now() AND similarity>=0.97 ORDER BY <=> LIMIT 1
+  │    │    └─ HIT → return SupportResolution(**cached) immediately, skip everything below
   │    ├─ vector_search(query_embedding, tenant_id, top_k=20)   [app/retrieval/vector_search.py]
   │    │    └─ SELECT ... ORDER BY embedding <=> %s::vector LIMIT 20   (cosine distance, tenant_id-filtered)
   │    ├─ keyword_search(query, tenant_id, top_k=20)            [app/retrieval/keyword_search.py]
@@ -57,12 +66,14 @@ process_ticket(ticket_id, tenant_id)  [app/tasks/process_ticket.py — Celery wo
   │    ├─ structured_client.chat.completions.create(..., response_model=SupportResolution)   [Groq call via instructor]
   │    ├─ filter resolution.citations to ids actually in retrieved_ids
   │    ├─ if confidence < 0.72 and action == "resolve": force action = "escalate"
-  │    └─ if action != "resolve" and answer is empty: substitute fallback holding message
+  │    ├─ if action != "resolve" and answer is empty: substitute fallback holding message
+  │    └─ if action == "resolve" and confidence >= 0.72: semantic_cache.store(...)   [Phase 8 — only eligible results get cached]
   ├─ UPDATE tickets SET status=resolution.action, resolution=<json>, updated_at=now() WHERE id=ticket_id
   │    (still unhandled: a Groq/instructor exception here is caught by `autoretry_for=(Exception,)` and retried up
   │    to 3 times at 60s intervals, then gives up silently — a permanently-failing ticket is left `status="pending"`
   │    forever with no operator-visible signal; noted in Phase 1 for the sync path, still true for the async one)
-  └─ publish_ticket_update(ticket_id, status, resolution)   [app/realtime/pubsub.py — sync `redis` client, PUBLISH on "ticket_updates"]
+  ├─ log_event("task_completed", request_id, ticket_id, action=resolution.action)
+  └─ publish_ticket_update(ticket_id, status, resolution, request_id)   [app/realtime/pubsub.py — sync `redis` client, PUBLISH on "ticket_updates"]
 
 WS /ws/tickets/{ticket_id}  [app/main.py:watch_ticket]
   ├─ tenant_id = websocket.headers["x-tenant-id"], default "acme"
@@ -73,6 +84,8 @@ WS /ws/tickets/{ticket_id}  [app/main.py:watch_ticket]
   ├─ connections.register(ticket_id, queue)          [app/realtime/connections.py — this instance's local registry]
   ├─ if already resolved: queue.put(...) immediately  (covers the race where the worker finishes before connect)
   └─ loop: asyncio.wait({queue.get(), websocket.receive_text()}, timeout=30)
+       ├─ queue has an update with a request_id → span "websocket_push" {request_id, ticket_id}; log_event(...)
+       │    (no request_id = the "already resolved before connect" immediate-push path — no live hop to trace)
        ├─ queue has an update → send_json(it); break if status != "pending" (terminal, nothing more to push)
        ├─ client sent something → ignore content, but a WebSocketDisconnect here ends the loop
        ├─ neither within 30s → send_json({"type":"ping"})   (heartbeat)
@@ -90,6 +103,7 @@ Background (started in app/main.py's `lifespan`, one per FastAPI instance):
 
 python -m scripts.ingest  [scripts/ingest.py:ingest]
   ├─ DELETE FROM knowledge_chunks   (wipe before reload)
+  ├─ DELETE FROM semantic_cache     (Phase 8 — a stale cached answer could cite chunk ids that no longer exist post-reload)
   └─ for each data/kb/*.md file:
        ├─ chunk(text, size=512, overlap=0.1)     [app/retrieval/chunk.py — tiktoken cl100k_base]
        └─ for each chunk: embed_document(chunk) → INSERT INTO knowledge_chunks
@@ -206,3 +220,23 @@ python -m scripts.watch_ticket <ticket_id> [ws://host:port]  [scripts/watch_tick
 - `requirements.txt` — added `pytest`. `.env.example` — added `APP_DATABASE_URL`.
 - **Bug found and fixed while running the new test suite live**: `SET LOCAL app.current_tenant = %s` failed outright (`psycopg.errors.SyntaxError: syntax error at or near "$1"`) — Postgres's `SET`/`SET LOCAL` don't accept bind parameters at all. Fixed with `SELECT set_config('app.current_tenant', %s, true)`, the parameterized equivalent. See DECISIONS.md.
 - **Live results**: `apply_schema` + `setup_app_role` run against the real Supabase DB; confirmed `postgres` has `rolbypassrls=true` and `app_role` has `rolbypassrls=false`; all 4 tenant-isolation tests green; full stack restarted on `app_role` and re-verified end-to-end (submit → resolve → websocket push) for `acme`; cross-tenant isolation proven at the *API* level too — `globex` requesting `acme`'s ticket got `404`, an unknown tenant slug got `400`, a `globex`-scoped websocket to `acme`'s ticket was accepted then closed with `4404`, and a real `globex` ticket correctly came back `need_info` (zero KB of its own, RLS means it can't see `acme`'s).
+
+### Session: 2026-08-24 (cont.) — Phase 8
+- `app/db/schema.sql` — added `semantic_cache` table (`tenant_id`, `query_text`, `query_embedding VECTOR(768)`, `response JSONB`, `expires_at` default `now() + 24h`); no ANN index (table stays small — only high-confidence `resolve` results get cached); RLS enabled/forced with the same `tenant_isolation` policy shape as `knowledge_chunks`/`tickets`.
+- `app/cache/__init__.py`, `app/cache/semantic_cache.py` — new; `lookup(query_embedding, tenant_id)` (cosine similarity ≥ 0.97, unexpired, tenant-scoped, `ORDER BY <=> LIMIT 1`) and `store(query_text, query_embedding, tenant_id, response)`. Both are unconditional store/read primitives — no cache-eligibility policy lives here (see DECISIONS.md).
+- `app/pipeline.py` — `resolve_ticket` now checks `semantic_cache.lookup` right after embedding the query (before hybrid retrieval even runs) and returns the cached `SupportResolution` immediately on a hit; at the end, stores the result only if `action == "resolve"` and `confidence >= CONFIDENCE_THRESHOLD`.
+- `scripts/ingest.py` — wipe-and-reload now also `DELETE FROM semantic_cache` (a stale cached answer could cite `knowledge_chunks.id` values a re-ingest no longer has).
+- `tests/test_semantic_cache.py` — new; 3 live pytest tests: the guide's adversarial pair doesn't collide, a near-identical (trailing-space) query does hit, and a real out-of-KB question run through the actual `resolve_ticket()` (Groq included) leaves nothing cached.
+- **Found and fixed a bad test fixture while running the suite live**: the first version of the "positive hit" test used a mid-sentence double-space variant, measured at 0.9275 similarity — below the 0.97 threshold, so the test failed correctly (not a bug in the cache, a bug in the test's own assumption). Fixed by empirically measuring several real variants first and picking a trailing-space edit (0.9944) that actually clears the bar. See DECISIONS.md for the full similarity measurements — they're the actual reason the threshold stayed at 0.97 rather than being tuned down for a higher hit rate.
+- **Verified live, twice**: confirmed the Phase 7 `ALTER DEFAULT PRIVILEGES` grant covered the brand-new `semantic_cache` table automatically (no `setup_app_role` re-run needed) by directly `SELECT`/`INSERT`/`DELETE`-ing through `app_role`. Then submitted the identical ticket text twice through the real running app: 26.69s cold (full pipeline) vs. 13.67s on the second submission — confirmed via the Celery log (no Groq HTTP call, no CrossEncoder rerank output on the second) that this was a genuine cache hit, not coincidental timing. Also measured that three bare `get_connection()` calls cost ~10.5s of that 13.67s (Supabase TLS handshake, ~3.5s each, non-pooled) — a real, pre-existing (not Phase-8-introduced) limitation, documented rather than glossed over. See DECISIONS.md.
+
+### Session: 2026-08-24 (cont.) — Phase 9
+- `app/telemetry/__init__.py`, `app/telemetry/tracing.py` — new; `setup_tracing(service_name)` (OTel `TracerProvider` + `ConsoleSpanExporter`, idempotent per process), `get_tracer()`, `new_request_id()` (`uuid4().hex[:12]`), `log_event(event, request_id, **fields)` (plain `logging` — the primary grep-able correlation mechanism, independent of whether anyone's looking at the OTel span output).
+- `app/main.py` — `setup_tracing("api")` at import time. `handle_ticket` reads/generates `request_id` (also accepted via `X-Request-ID` header for a caller-supplied value), wraps the handler body in an OTel span, logs `ticket_received`/`ticket_enqueued`, returns it in both the response body and an `X-Request-ID` response header, and passes it to `process_ticket.delay(...)`. `watch_ticket` creates a `websocket_push` span + log line for any queued message that carries a `request_id` (i.e. a genuine live pub/sub delivery, not the "already resolved before connect" immediate-push path).
+- `app/tasks/process_ticket.py` — `setup_tracing("worker")` at import time; task signature is now `process_ticket(self, ticket_id, tenant_id, request_id)`; wraps the task body in a `process_ticket` span, logs `task_started`/`task_completed`/`task_skipped_ghost_ticket`, passes `request_id` through to `publish_ticket_update`.
+- `app/realtime/pubsub.py` — `publish_ticket_update` gains a required `request_id` param, included in the published JSON payload so it survives the Redis pub/sub hop and reaches `watch_ticket` on whichever instance ends up delivering it.
+- `evals/golden_set.jsonl` — new; 18 hand-written Q&A pairs spanning all 6 KB docs (13 `resolve` cases) plus 5 deliberately-should-not-auto-resolve cases (legal/injury, explicit human request, high order value, two genuinely out-of-KB questions) — see DECISIONS.md for why `expected_action` is `"resolve"`/`"not_resolve"` rather than a literal 3-way action match.
+- `evals/test_eval.py` — new; runs each golden-set case through the real `resolve_ticket()`, asserts the action classification and (for `resolve` cases) that at least one citation resolves back to an expected source document via a live `knowledge_chunks` lookup. `autouse` fixture wipes `acme`'s `semantic_cache` first so a same-day re-run can't be silently served from cache instead of testing current behavior.
+- `requirements.txt` — added `opentelemetry-api`, `opentelemetry-sdk`, under a new "Phase 9" section.
+- **Found a real environment gotcha while smoke-testing after restart, not a code bug**: `curl http://localhost:8000/...` was silently answered by `wslrelay.exe` on IPv6 `[::1]:8000` (an unrelated WSL port-forward) instead of this app's uvicorn (bound to IPv4 `0.0.0.0:8000` only) — traced via `curl -v` showing the IPv6 connection and an unfamiliar `x-request-id` value. Switched to `127.0.0.1` explicitly for the rest of the session. See DECISIONS.md.
+- **Live results**: submitted a real ticket, captured its `request_id` from the `202` response, and confirmed the *same* id appears in the correct order across three independent log streams (API `ticket_received`→`ticket_enqueued`, Celery `task_started`→`task_completed`, API again for `websocket_push`) — BUILD_PLAN.md's Phase 9 verify step, done for real. `pytest evals/test_eval.py` — 18/18 passed (~6m10s, real API calls). Full integration pass per ONE_WEEK_PLAN.md Day 7 — `pytest tests/ evals/test_eval.py` together — 25/25 passed (~7m36s). Repeated the correlation-ID trace across two live uvicorn instances (8000/8001) with a cross-tenant (`globex`) submission created on one instance and delivered on the other — same `request_id` traced correctly across all three hops even with the create-hop and push-hop on physically different processes.

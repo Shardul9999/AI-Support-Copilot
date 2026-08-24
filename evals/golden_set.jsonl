@@ -1,0 +1,18 @@
+{"subject": "Refund request", "body": "I bought this 10 days ago, can I get a refund?", "expected_action": "resolve", "expected_sources": ["refund_policy.md"]}
+{"subject": "Refund after window", "body": "It's been 20 days since my order was delivered, can I still get a refund?", "expected_action": "resolve", "expected_sources": ["refund_policy.md"]}
+{"subject": "Damaged item", "body": "My item arrived broken, what are my options?", "expected_action": "resolve", "expected_sources": ["refund_policy.md"]}
+{"subject": "Final sale refund", "body": "I bought a final sale clearance item, can I get a cash refund?", "expected_action": "resolve", "expected_sources": ["refund_policy.md"]}
+{"subject": "International shipping", "body": "Do you ship to Nepal?", "expected_action": "resolve", "expected_sources": ["shipping_policy.md"]}
+{"subject": "Late delivery", "body": "My package hasn't arrived in 12 business days since it was dispatched, what's going on?", "expected_action": "resolve", "expected_sources": ["shipping_policy.md"]}
+{"subject": "Delete my account", "body": "How do I permanently delete my Acme account?", "expected_action": "resolve", "expected_sources": ["account_management.md"]}
+{"subject": "Forgot password", "body": "I forgot my password, how do I get back into my account?", "expected_action": "resolve", "expected_sources": ["account_management.md"]}
+{"subject": "Manual password reset", "body": "Can support just manually reset my password for me directly over chat?", "expected_action": "resolve", "expected_sources": ["account_management.md"]}
+{"subject": "Duplicate charge", "body": "I was charged twice for the same order, can you look into it?", "expected_action": "resolve", "expected_sources": ["payments_and_billing.md"]}
+{"subject": "Checkout error", "body": "I'm getting error code TXN_4471 when I try to check out.", "expected_action": "resolve", "expected_sources": ["error_codes.md"]}
+{"subject": "Payment timeout error", "body": "I got error code TXN_9987 during payment, what should I do?", "expected_action": "resolve", "expected_sources": ["error_codes.md"]}
+{"subject": "Cash on delivery", "body": "Can I pay cash on delivery for a Rs 6000 order?", "expected_action": "resolve", "expected_sources": ["payments_and_billing.md"]}
+{"subject": "Product injury", "body": "My child was injured by a defective product I bought from you and I'm considering legal action.", "expected_action": "not_resolve", "expected_sources": ["escalation_and_support.md"]}
+{"subject": "Speak to manager", "body": "I don't want to talk to a bot, please connect me to a human manager right now.", "expected_action": "not_resolve", "expected_sources": ["escalation_and_support.md"]}
+{"subject": "High-value order refund", "body": "My order was worth Rs 25,000 and I'd like a routine refund on it, it's been 5 days since delivery.", "expected_action": "not_resolve", "expected_sources": ["escalation_and_support.md", "refund_policy.md"]}
+{"subject": "Loyalty program", "body": "Does Acme have a loyalty rewards points program I can sign up for?", "expected_action": "not_resolve", "expected_sources": []}
+{"subject": "Unrelated question", "body": "What was Acme's total revenue last year?", "expected_action": "not_resolve", "expected_sources": []}

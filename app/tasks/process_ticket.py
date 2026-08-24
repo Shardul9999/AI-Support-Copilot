@@ -5,6 +5,7 @@ vector_search, keyword_search, rerank, the Groq call) has been synchronous
 since Phase 2, so there's no coroutine to run and no asyncio.run() needed."""
 from app.db.session import get_connection
 from app.pipeline import resolve_ticket
+from app.realtime.pubsub import publish_ticket_update
 from app.tasks.celery_app import celery_app
 
 
@@ -15,25 +16,31 @@ from app.tasks.celery_app import celery_app
     default_retry_delay=60,
     time_limit=120,
 )
-def process_ticket(self, ticket_id: int):
-    with get_connection() as conn:
+def process_ticket(self, ticket_id: int, tenant_id: str):
+    # tenant_id comes from the caller (POST /tickets already resolved and validated
+    # it — see app/main.py), not a fresh lookup here: get_connection needs a tenant
+    # to scope its transaction *before* it can run any query at all under RLS, so
+    # there's no RLS-safe way to "look up the tenant" from an unscoped connection.
+    with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT tenant_id, subject, body FROM tickets WHERE id = %s", (ticket_id,))
+            cur.execute("SELECT subject, body FROM tickets WHERE id = %s AND tenant_id = %s", (ticket_id, tenant_id))
             row = cur.fetchone()
 
     if row is None:
-        return  # ticket vanished — nothing to do, don't retry forever on a ghost id
+        return  # ticket vanished (or tenant mismatch) — nothing to do, don't retry forever on a ghost id
 
-    tenant_id, subject, body = row
+    subject, body = row
     resolution = resolve_ticket(subject, body, tenant_id)
 
-    with get_connection() as conn:
+    with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE tickets
                 SET status = %s, resolution = %s::jsonb, updated_at = now()
-                WHERE id = %s
+                WHERE id = %s AND tenant_id = %s
                 """,
-                (resolution.action, resolution.model_dump_json(), ticket_id),
+                (resolution.action, resolution.model_dump_json(), ticket_id, tenant_id),
             )
+
+    publish_ticket_update(ticket_id, resolution.action, resolution.model_dump())

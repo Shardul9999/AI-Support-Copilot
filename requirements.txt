@@ -19,3 +19,9 @@ sentence-transformers
 # Phase 5 — queue
 celery
 redis
+
+# Phase 6 — realtime delivery
+websockets
+
+# Phase 7 — multi-tenancy + RLS
+pytest

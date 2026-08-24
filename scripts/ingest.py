@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.db.session import get_connection
+from app.db.session import get_admin_connection
 from app.retrieval.chunk import chunk
 from app.retrieval.embed import embed_document
 
@@ -19,7 +19,10 @@ DOCS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "kb")
 
 
 def ingest():
-    conn = get_connection()
+    # Admin connection, not the restricted app_role: ingestion is a trusted
+    # operator action (loading the KB), not a request-serving path, so RLS's
+    # per-tenant enforcement isn't the relevant concern here (see DECISIONS.md).
+    conn = get_admin_connection()
     with conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM knowledge_chunks")

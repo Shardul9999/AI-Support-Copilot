@@ -267,4 +267,79 @@ Chronological log of implementation decisions made while building the AI Support
 
 ---
 
-*(Further entries land as coding continues into Phase 6 onward.)*
+### [2026-08-24] WebSocket registry keyed on `asyncio.Queue`, not the raw `WebSocket` object
+- **Phase**: 6
+- **Decision**: `app/realtime/connections.py`'s in-memory registry maps `ticket_id -> set[asyncio.Queue]`. The Redis pub/sub subscriber (and the "already resolved" immediate-push path) put messages onto a connection's queue; they never touch the `WebSocket` object directly.
+- **Alternatives considered**: registry holds the `WebSocket` directly, and a pushed update calls `websocket.send_json()` straight from the pub/sub callback — simpler, but then the per-connection handler loop (which also needs to read client messages for disconnect detection and drive the heartbeat timer) would have two independent code paths writing to/reading from the same socket with no way to wait on "next pushed update OR next client message OR heartbeat timeout" as one coordinated thing.
+- **Reasoning**: routing pushes through a queue lets the single per-connection handler (`app/main.py:watch_ticket`) use one `asyncio.wait({queue.get(), websocket.receive_text()}, timeout=30)` loop to drive all three concerns (deliver an update, notice a client disconnect, send a heartbeat on timeout) without extra locking or a second task per connection.
+- **Files affected**: `app/realtime/connections.py`, `app/main.py`.
+
+### [2026-08-24] Went straight to the Redis pub/sub design instead of literally shipping the single-instance direct-dispatch version first
+- **Phase**: 6
+- **Decision**: did not commit an intermediate version where the Celery worker calls the connections registry directly (in-process only, no Redis). Went straight to: worker publishes to Redis → every FastAPI instance's background subscriber (started in `lifespan`) receives every message → each instance's `connections.dispatch_local` decides whether it has a local queue for that ticket.
+- **Reasoning**: ONE_WEEK_PLAN.md's Day 5 plan calls for building the silent-drop bug on purpose (single-instance direct dispatch) and then fixing it, as a *learning* exercise. That's the right way to build the mental model live, but it's not a good reason to put deliberately-broken code into the actual repo history/main branch. The mechanism is documented instead: the Celery worker process and any given FastAPI instance are different processes; a direct in-process call from the worker can't reach a client connected to a *different* uvicorn instance, so with 2+ instances behind a proxy, updates would silently never reach roughly half of connected clients depending on which instance handled the original `POST /tickets` vs. which instance the client's websocket landed on. Verified live instead by literally running two instances (ports 8000 and 8001) and confirming a ticket enqueued via 8000 is pushed to a client connected on 8001 — see FLOW.md session log.
+- **Files affected**: `app/realtime/pubsub.py`, `app/realtime/connections.py`, `app/main.py`.
+
+### [2026-08-24] Heartbeat and disconnect detection both live inside one `asyncio.wait` loop, not separate tasks
+- **Phase**: 6
+- **Decision**: `watch_ticket`'s loop races `queue.get()` against `websocket.receive_text()` with a 30s `timeout`. If neither completes in time, a `{"type": "ping"}` heartbeat is sent and the loop repeats.
+- **Alternatives considered**: a separate `asyncio.create_task` heartbeat loop running concurrently with the main receive loop (send a ping every 30s regardless of other activity) — simpler to read, but then cleanup requires explicitly cancelling a second task on every exit path (normal disconnect, terminal-state break, exception), and it sends a ping every 30s of wall-clock time even in the middle of active traffic, which is wasted chatter.
+- **Reasoning**: a single `asyncio.wait(..., timeout=30)` naturally resets the heartbeat clock on any activity (a delivered update or a client message both count) and there's only one exit path to manage in `finally`. Verified live: connected to a ticket that was inserted directly into the DB without ever being enqueued (so it can never resolve) and confirmed exactly one `{"type": "ping"}` arrived at ~30s with no other activity.
+- **Files affected**: `app/main.py`.
+
+### [2026-08-24] Phase 6 end-to-end verification — live, not simulated
+- **Phase**: 6
+- **What was actually run**: found and killed two *stale* FastAPI/Celery processes left running from the prior (Phase 5) session, still bound to `127.0.0.1:8000` — they were silently answering `localhost` requests instead of the freshly-started process on `0.0.0.0:8000`, which produced a confusing `403` on the very first websocket test (Starlette/uvicorn's `websockets` implementation returns 403 when the ASGI app closes before ever accepting — here because the old process had no `/ws/tickets/{id}` route at all). Killed both stale PIDs, confirmed via `netstat` only the new process remained on 8000, then re-ran every test:
+  1. Ticket submitted, websocket connected while it was still pending → resolution pushed live the moment the worker finished (`app/tasks/process_ticket.py`'s new `publish_ticket_update` call).
+  2. Websocket connected *after* the ticket had already resolved → the immediate DB-read-and-push-on-connect path fired instead of waiting on a pub/sub message that would never come.
+  3. A ticket inserted directly (never enqueued, so it never resolves) → confirmed exactly one `{"type":"ping"}` heartbeat at ~30s, connection stayed open.
+  4. **The actual Day 5 milestone**: ran a second uvicorn instance on port 8001 alongside the original on 8000 (both subscribed to Redis independently via their own `lifespan`-started background task). Submitted a ticket through instance A (8000); connected the websocket client to instance B (8001) — a process that never touched the enqueue. The resolution still arrived on instance B, proving the Redis pub/sub fanout (not same-process luck) is what's doing the work.
+- **Files affected**: none (verification record only) — see FLOW.md's session log for the full sequence.
+
+### [2026-08-24] Bug fix: `finally` block's `websocket.close()` could raise `WebSocketDisconnect`, not just `RuntimeError`
+- **Phase**: 6
+- **Decision**: `contextlib.suppress(RuntimeError, WebSocketDisconnect)` around the cleanup `websocket.close()` call, instead of `RuntimeError` alone.
+- **Reasoning**: found by running the app for real and reading the server log afterward — a client that hangs up abnormally at the same moment the server delivers the terminal update (e.g. the demo CLI client getting killed by an external `timeout` right as it received the resolution) leaves the connection in a state where Starlette's `close()` raises `WebSocketDisconnect(code=1006)` from inside `send()`, not `RuntimeError`. It didn't crash the server (FastAPI/Starlette scope this per-request), but it printed an unhandled-exception traceback for what is actually a benign, expected race — the client is gone either way, closing an already-gone connection isn't an error.
+- **Files affected**: `app/main.py`.
+
+---
+
+### [2026-08-24] A dedicated least-privilege `app_role`, not the Supabase-provided `postgres` role, for the running app
+- **Phase**: 7
+- **Decision**: added `scripts/setup_app_role.py` — creates/rotates a Postgres role `app_role` (LOGIN, no special attributes) with grants scoped to the app's own tables, and writes its connection string to a new `APP_DATABASE_URL` env var. `DATABASE_URL` (the original Supabase-provided connection) becomes admin-only: schema/migrations (`scripts/apply_schema.py`) and ingestion (`scripts/ingest.py`).
+- **Reasoning**: checked live before assuming anything (same discipline as every other provider/role fact in this log) — `SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user` on the existing `DATABASE_URL` connection returned `true`. A role with `rolbypassrls = true` ignores Row-Level Security entirely, `FORCE ROW LEVEL SECURITY` included — so every policy added below would have been silently inert if the running app kept using that connection. `app_role` has no such attribute (`rolbypassrls = false`, confirmed live), so the policies apply to it normally. The password is generated fresh (`secrets.token_urlsafe(24)`) and written straight into `.env`, never printed to stdout, so it doesn't end up in shell history or a captured log.
+- **Files affected**: `scripts/setup_app_role.py` (new), `scripts/apply_schema.py` (new — see next entry), `app/db/session.py`, `.env.example`.
+
+### [2026-08-24] `scripts/apply_schema.py` added — schema.sql was previously applied by ad hoc one-off commands each session
+- **Phase**: 7
+- **Decision**: a small script that reads `app/db/schema.sql` and executes it against `DATABASE_URL` in one call, `autocommit=True`.
+- **Reasoning**: every earlier phase's schema change (Phase 2's tables, Phase 4's `search_vector` column, Phase 5's `tickets` table) was applied to the live Supabase DB via an inline one-off command during that session, not a reusable script — fine when schema.sql only grew occasionally, but Phase 7 adds a `tenants` table, two `ALTER TABLE ... ENABLE/FORCE ROW LEVEL SECURITY` statements, and two `CREATE POLICY` statements, and Phase 8 will add `semantic_cache` on top — enough recurring surface to be worth not re-deriving by hand every time. Confirmed live that psycopg3's `cur.execute()` accepts a whole multi-statement `;`-separated script in one call (falls back to the simple query protocol when no parameters are passed), so no manual statement-splitting was needed. Safe to re-run because every statement in schema.sql is already idempotent (`IF NOT EXISTS`, `DROP POLICY IF EXISTS`, `ON CONFLICT DO NOTHING`).
+- **Files affected**: `scripts/apply_schema.py` (new).
+
+### [2026-08-24] RLS policies on `knowledge_chunks` and `tickets`; `tenants` is the one table deliberately left unprotected
+- **Phase**: 7
+- **Decision**: `ALTER TABLE ... ENABLE/FORCE ROW LEVEL SECURITY` + one `CREATE POLICY ... USING (tenant_id = current_setting('app.current_tenant', true)) WITH CHECK (...)` per table, on `knowledge_chunks` and `tickets`. `tenants` itself gets no RLS — it's the global tenant directory (used to validate an incoming `X-Tenant-ID` before anything else), not per-tenant data, so scoping it to a tenant would make it impossible to look itself up.
+- **Reasoning**: `current_setting('app.current_tenant', true)` — the `true` argument means "return NULL instead of raising" if the session variable was never set. `tenant_id = NULL` is never true in SQL (three-valued logic), so a connection that never calls `set_config` at all sees zero rows from every tenant, not just the "wrong" one — fail-closed by default, matching what `tests/test_tenant_isolation.py::test_no_tenant_set_at_all_sees_nothing` proves live. `WITH CHECK` (not just `USING`) matters too: without it, `app_role` could `INSERT`/`UPDATE` a row into a *different* tenant than the one its own transaction is scoped to, even though it could never read that row back afterward — `USING` alone only protects reads.
+- **Files affected**: `app/db/schema.sql`.
+
+### [2026-08-24] Bug fix: `SET LOCAL app.current_tenant = %s` doesn't work — Postgres's `SET` doesn't accept bind parameters
+- **Phase**: 7
+- **Decision**: `SELECT set_config('app.current_tenant', %s, true)` instead of `SET LOCAL app.current_tenant = %s`. The third argument to `set_config` (`is_local`) is what makes this `SET LOCAL`'s exact equivalent — scoped to the current transaction, not the whole session.
+- **Reasoning**: found by actually running the new tenant-isolation test suite, not by inspection — `psycopg.errors.SyntaxError: syntax error at or near "$1"` on the very first call. Postgres's `SET`/`SET LOCAL` commands only accept a literal in that position; the extended query protocol's bind-parameter mechanism (`$1`) isn't valid there at all, regardless of client library. `set_config()` is a normal SQL function, so it takes parameters exactly like any other function call — this is the standard, documented way to parameterize a session/transaction-local GUC value in Postgres.
+- **Files affected**: `app/db/session.py`.
+
+### [2026-08-24] `X-Tenant-ID` header (default `"acme"`) is the tenant-resolution mechanism — no real auth, by design
+- **Phase**: 7
+- **Decision**: `POST /tickets`, `GET /tickets/{id}`, and `WS /ws/tickets/{id}` all read tenant identity from a plain `X-Tenant-ID` header (or `websocket.headers` for the websocket route), defaulting to `"acme"` when absent. Checked against the new `tenants` table (`_tenant_exists` in `app/main.py`) before anything else runs; an unknown tenant gets `400` (HTTP) or a `4400` close (websocket).
+- **Alternatives considered**: real auth (API keys mapped to a tenant, JWT claims) — explicitly out of scope; BUILD_PLAN.md's Phase 7 description is about RLS storage-enforcement, not an auth system, and adding one would be scope creep this buildathon doesn't need. A header is enough to prove the multi-tenant *data* story (isolation, RLS) end-to-end without pretending there's real authentication where there isn't one.
+- **Reasoning**: keeps every existing demo command from earlier phases working unchanged (no header → `"acme"`, same tenant every prior curl/websocket example already assumed), while making a second tenant (`globex`) fully reachable for anyone who does send the header. Verified live: a `globex`-scoped `POST /tickets` for a shipping question correctly came back `action="need_info"` with `citations: []` and `confidence: 0.2` — because `globex` has zero ingested `knowledge_chunks` (only `acme`'s KB was ever ingested) and RLS means it structurally cannot see `acme`'s rows to answer from, even though `acme`'s `shipping_policy.md` chunk exists in the very same table.
+- **Files affected**: `app/main.py`, `scripts/watch_ticket.py` (added a `tenant_id` positional arg).
+
+### [2026-08-24] Phase 7 end-to-end verification — live, not simulated
+- **Phase**: 7
+- **What was actually run**: `python -m scripts.apply_schema` (added `tenants` table + RLS to the live Supabase DB), `python -m scripts.setup_app_role` (created `app_role`, wrote `APP_DATABASE_URL` to `.env`), confirmed live that `postgres` has `rolbypassrls=true` and `app_role` has `rolbypassrls=false`. Ran `pytest tests/test_tenant_isolation.py` — all 4 tests green against the real database (found and fixed the `SET LOCAL` bug above in the process). Restarted the full stack (uvicorn + Celery) on the new `app_role` connection and re-verified the whole request path still works: `POST /tickets` → `202` → Celery → `resolve_ticket` → DB update → websocket push, for a real `acme` ticket. Then proved isolation at the *API* level, not just the DB level: `globex` requesting `acme`'s ticket 11 by ID got `404` (not `403` — doesn't even reveal the ticket exists); an unknown tenant slug got `400`; a `globex`-scoped websocket connection to `acme`'s ticket 11 was accepted (per Phase 6's accept-then-check design) then immediately closed with code `4404`; a real `globex` ticket resolved correctly through the full pipeline as `need_info` due to having no KB of its own (see the header-resolution entry above for why that's a good sign, not a bug).
+- **Files affected**: none (verification record only) — see FLOW.md's session log for the full sequence.
+
+---
+
+*(Further entries land as coding continues into Phase 8 onward.)*

@@ -5,7 +5,7 @@ def vector_search(query_embedding: list[float], tenant_id: str, top_k: int = 5) 
     """Nearest-neighbour search over knowledge_chunks. tenant_id is required,
     not optional — Phase 7 makes this storage-enforced via RLS, but the habit
     of never calling this without a tenant starts now."""
-    with get_connection() as conn:
+    with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """

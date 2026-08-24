@@ -1,19 +1,48 @@
 # app/main.py  —  pip install -r requirements.txt
+import asyncio
+import contextlib
 import uuid
 
 from dotenv import load_dotenv
 
 load_dotenv()  # must run before any app-local import that reads env vars at module load time (embed.py, session.py)
 
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
 
 from app.db.session import get_connection
 from app.models import Ticket
+from app.realtime import connections
+from app.realtime.pubsub import subscribe_forever
 from app.tasks.process_ticket import process_ticket
 
-app = FastAPI()
+DEFAULT_TENANT = "acme"  # default when a caller doesn't send X-Tenant-ID — keeps pre-Phase-7 demo commands working
+HEARTBEAT_INTERVAL = 30  # seconds between pings while a ticket is still pending
 
-DEFAULT_TENANT = "acme"  # single-tenant placeholder until Phase 7 makes this per-request
+
+async def _dispatch_update(payload: dict) -> None:
+    await connections.dispatch_local(payload["ticket_id"], payload)
+
+
+def _tenant_exists(cur, tenant_id: str) -> bool:
+    # tenants has no RLS (it's the global tenant directory, not per-tenant data), so
+    # this is a plain lookup regardless of which tenant the connection's SET LOCAL used.
+    cur.execute("SELECT 1 FROM tenants WHERE slug = %s", (tenant_id,))
+    return cur.fetchone() is not None
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    # One background subscriber per instance, started at startup — this is what makes
+    # a worker's publish() reach every instance, not just the one that happened to
+    # enqueue the ticket. See app/realtime/pubsub.py for why this exists.
+    subscriber = asyncio.create_task(subscribe_forever(_dispatch_update))
+    yield
+    subscriber.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await subscriber
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.post("/tickets")
@@ -21,14 +50,18 @@ def handle_ticket(
     ticket: Ticket,
     response: Response,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID"),
 ):
     idempotency_key = idempotency_key or str(uuid.uuid4())
 
-    with get_connection() as conn:
+    with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
+            if not _tenant_exists(cur, tenant_id):
+                raise HTTPException(status_code=400, detail=f"unknown tenant: {tenant_id!r}")
+
             cur.execute(
                 "SELECT id, status, resolution FROM tickets WHERE tenant_id = %s AND idempotency_key = %s",
-                (DEFAULT_TENANT, idempotency_key),
+                (tenant_id, idempotency_key),
             )
             existing = cur.fetchone()
 
@@ -44,23 +77,26 @@ def handle_ticket(
                 VALUES (%s, %s, %s, %s)
                 RETURNING id
                 """,
-                (DEFAULT_TENANT, idempotency_key, ticket.subject, ticket.body),
+                (tenant_id, idempotency_key, ticket.subject, ticket.body),
             )
             ticket_id = cur.fetchone()[0]
 
-    process_ticket.delay(ticket_id)
+    process_ticket.delay(ticket_id, tenant_id)
 
     response.status_code = 202
     return {"ticket_id": ticket_id, "status": "pending"}
 
 
 @app.get("/tickets/{ticket_id}")
-def get_ticket(ticket_id: int):
-    with get_connection() as conn:
+def get_ticket(ticket_id: int, tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID")):
+    with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
+            if not _tenant_exists(cur, tenant_id):
+                raise HTTPException(status_code=400, detail=f"unknown tenant: {tenant_id!r}")
+
             cur.execute(
                 "SELECT status, resolution FROM tickets WHERE id = %s AND tenant_id = %s",
-                (ticket_id, DEFAULT_TENANT),
+                (ticket_id, tenant_id),
             )
             row = cur.fetchone()
 
@@ -68,3 +104,67 @@ def get_ticket(ticket_id: int):
         raise HTTPException(status_code=404, detail="ticket not found")
 
     return {"ticket_id": ticket_id, "status": row[0], "resolution": row[1]}
+
+
+@app.websocket("/ws/tickets/{ticket_id}")
+async def watch_ticket(websocket: WebSocket, ticket_id: int):
+    tenant_id = websocket.headers.get("x-tenant-id", DEFAULT_TENANT)
+    await websocket.accept()
+
+    with get_connection(tenant_id) as conn:
+        with conn.cursor() as cur:
+            if not _tenant_exists(cur, tenant_id):
+                await websocket.close(code=4400, reason="unknown tenant")
+                return
+
+            cur.execute(
+                "SELECT status, resolution FROM tickets WHERE id = %s AND tenant_id = %s",
+                (ticket_id, tenant_id),
+            )
+            row = cur.fetchone()
+
+    if row is None:
+        await websocket.close(code=4404, reason="ticket not found")
+        return
+
+    queue: asyncio.Queue = asyncio.Queue()
+    connections.register(ticket_id, queue)
+
+    status, resolution = row
+    if status != "pending":
+        # Already finished by the time the client connected (a real race — the worker
+        # can win it) — push the terminal state immediately rather than making the
+        # client wait for a pub/sub message that will never come.
+        await queue.put({"ticket_id": ticket_id, "status": status, "resolution": resolution})
+
+    try:
+        while True:
+            update = asyncio.ensure_future(queue.get())
+            client_msg = asyncio.ensure_future(websocket.receive_text())
+            done, pending = await asyncio.wait(
+                {update, client_msg}, timeout=HEARTBEAT_INTERVAL, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+
+            if update in done:
+                message = update.result()
+                await websocket.send_json(message)
+                if message.get("status") != "pending":
+                    break  # terminal state delivered — this ticket has nothing further to push
+
+            if client_msg in done:
+                client_msg.result()  # raises WebSocketDisconnect if the client hung up; ignore any other content (pong/keepalive)
+
+            if not done:
+                await websocket.send_json({"type": "ping"})  # heartbeat: nothing happened this interval
+    except WebSocketDisconnect:
+        pass
+    finally:
+        connections.unregister(ticket_id, queue)
+        # The client may have already disconnected by the time we get here (e.g. it hung up
+        # right as we delivered the terminal update) — Starlette raises RuntimeError if the
+        # connection was never accepted-and-open, WebSocketDisconnect if it's accepted but the
+        # client is already gone. Either way, closing an already-gone connection isn't an error.
+        with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+            await websocket.close()

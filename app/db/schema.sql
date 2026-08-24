@@ -1,5 +1,18 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
+CREATE TABLE IF NOT EXISTS tenants (
+    slug       TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 'acme' is the tenant every other table's DEFAULT already assumed since Phase 2.
+-- 'globex' exists purely so Phase 7's isolation test has a second, real tenant to
+-- prove separation against, instead of asserting "zero rows" against a tenant that
+-- was never populated in the first place.
+INSERT INTO tenants (slug, name) VALUES ('acme', 'Acme Corp') ON CONFLICT (slug) DO NOTHING;
+INSERT INTO tenants (slug, name) VALUES ('globex', 'Globex Corporation') ON CONFLICT (slug) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
     id           BIGSERIAL PRIMARY KEY,
     tenant_id    TEXT NOT NULL DEFAULT 'acme',   -- real enforcement lands in Phase 7 (RLS); column exists now so it isn't retrofitted later
@@ -43,3 +56,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS tickets_tenant_idempotency_key
 
 CREATE INDEX IF NOT EXISTS tickets_tenant_id
     ON tickets (tenant_id);
+
+-- Phase 7: Row-Level Security. The Supabase-provided `postgres` role this schema is
+-- applied as has rolbypassrls = true (confirmed live: SELECT rolbypassrls FROM
+-- pg_roles WHERE rolname = current_user), so every policy below is a deliberate
+-- no-op for that role — it's the escape hatch admin/migration/ingestion scripts
+-- keep using. The running app must connect as `app_role` instead (see
+-- scripts/setup_app_role.py) for these policies to actually do anything.
+--
+-- current_setting(..., true) — the `true` means "return NULL instead of raising"
+-- if app.current_tenant was never set for this transaction. tenant_id = NULL is
+-- never true in SQL, so a connection that skips tenant resolution entirely (not
+-- just skips the WHERE clause) still sees zero rows — fail-closed, not fail-open.
+ALTER TABLE knowledge_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_chunks FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON knowledge_chunks;
+CREATE POLICY tenant_isolation ON knowledge_chunks
+    USING (tenant_id = current_setting('app.current_tenant', true))
+    WITH CHECK (tenant_id = current_setting('app.current_tenant', true));
+
+ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tickets FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tenant_isolation ON tickets;
+CREATE POLICY tenant_isolation ON tickets
+    USING (tenant_id = current_setting('app.current_tenant', true))
+    WITH CHECK (tenant_id = current_setting('app.current_tenant', true));

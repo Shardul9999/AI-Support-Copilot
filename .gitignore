@@ -6,3 +6,11 @@ venv/
 .pytest_cache/
 *.egg-info/
 .DS_Store
+
+# internal working docs — not part of the public submission
+BUILD_PLAN.md
+DECISIONS.md
+FLOW.md
+ONE_WEEK_PLAN.md
+QUIZ_LOG.md
+p1-support-copilot-understanding.html

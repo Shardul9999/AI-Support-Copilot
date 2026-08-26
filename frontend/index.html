@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Support Copilot</title>
+<style>
+  @layer base{html,body{margin:0;padding:0;height:100%;}body{overscroll-behavior:none;}}
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:#1E293B;border-radius:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  @keyframes skel{0%,100%{opacity:.35}50%{opacity:.7}}
+  .skel{animation:skel 1.4s ease-in-out infinite;}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+<script src="https://cdn.tailwindcss.com"></script>
+<script id="tailwind-config">
+tailwind.config={darkMode:"class",theme:{extend:{
+"colors":{"text-muted":"#64748B","text-primary":"#F8FAFC","on-surface":"#dae2fd","primary":"#4be277",
+"primary-container":"#22c55e","on-primary":"#003915","surface":"#0b1326","surface-raised":"#1E293B",
+"surface-variant":"#2d3449","surface-container":"#171f33","surface-container-highest":"#2d3449",
+"background":"#020617","status-pending":"#3B82F6","status-resolved":"#22C55E",
+"status-escalated":"#DC2626","status-info":"#F59E0B"},
+"borderRadius":{"DEFAULT":"0.25rem","lg":"0.5rem","xl":"0.75rem","full":"9999px"},
+"spacing":{"xs":"4px","sm":"8px","unit":"8px","md":"16px","gutter":"16px","lg":"24px","margin":"24px","xl":"32px"},
+"fontFamily":{"body-lg":["Fira Sans"],"body-md":["Fira Sans"],"body-sm":["Fira Sans"],
+"headline-md":["Fira Sans"],"headline-lg":["Fira Sans"],"status-label":["Fira Code"],"data-mono":["Fira Code"]},
+"fontSize":{"body-lg":["16px",{"lineHeight":"24px","fontWeight":"400"}],
+"body-md":["14px",{"lineHeight":"20px","fontWeight":"400"}],
+"body-sm":["13px",{"lineHeight":"18px","fontWeight":"400"}],
+"status-label":["11px",{"lineHeight":"12px","letterSpacing":"0.05em","fontWeight":"600"}],
+"data-mono":["13px",{"lineHeight":"16px","fontWeight":"450"}],
+"headline-md":["20px",{"lineHeight":"28px","fontWeight":"600"}],
+"headline-lg":["24px",{"lineHeight":"32px","fontWeight":"600"}]}}}}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Fira+Sans:wght@400;600&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet"/>
+</head>
+<body class="bg-background font-body-md text-on-surface">
+
+<!-- ─────────── SIDEBAR ─────────── -->
+<aside class="fixed left-0 top-0 h-full w-[240px] bg-background border-r border-surface-raised z-50 flex flex-col justify-between">
+  <div class="flex flex-col">
+    <div class="px-lg pt-lg mb-xl">
+      <div class="flex items-center gap-xs">
+        <span class="material-symbols-outlined text-primary text-[20px]">grid_view</span>
+        <span class="font-data-mono text-body-md tracking-widest text-primary uppercase">Support Copilot</span>
+      </div>
+    </div>
+    <nav class="flex flex-col gap-xs px-sm">
+      <a id="nav-submit" href="#" data-view="submit" class="nav-link flex items-center px-md py-sm rounded transition-colors cursor-pointer">
+        <span class="material-symbols-outlined mr-sm text-[20px]">add_box</span><span class="font-body-md">Submit Ticket</span>
+      </a>
+      <a id="nav-queue" href="#" data-view="queue" class="nav-link flex items-center px-md py-sm rounded transition-colors cursor-pointer">
+        <span class="material-symbols-outlined mr-sm text-[20px]">list</span><span class="font-body-md">Ticket Queue</span>
+      </a>
+    </nav>
+    <div class="mt-xl pt-lg border-t border-surface-raised px-lg flex flex-col gap-sm">
+      <div class="flex justify-between font-data-mono text-status-label"><span class="text-status-pending">PENDING</span><span id="count-pending" class="text-on-surface">—</span></div>
+      <div class="flex justify-between font-data-mono text-status-label"><span class="text-status-resolved">RESOLVED</span><span id="count-resolved" class="text-on-surface">—</span></div>
+      <div class="flex justify-between font-data-mono text-status-label"><span class="text-status-escalated">ESCALATED</span><span id="count-escalated" class="text-on-surface">—</span></div>
+      <div class="flex justify-between font-data-mono text-status-label"><span class="text-status-info">NEEDS INFO</span><span id="count-needinfo" class="text-on-surface">—</span></div>
+    </div>
+  </div>
+  <div class="p-lg border-t border-surface-raised flex flex-col gap-xs">
+    <span class="font-data-mono text-status-label text-text-muted uppercase tracking-widest">Auto-resolve threshold</span>
+    <span class="font-data-mono text-body-md text-primary">0.72</span>
+  </div>
+</aside>
+
+<div class="pl-[240px]">
+  <!-- ─────────── HEADER ─────────── -->
+  <header class="fixed top-0 left-[240px] right-0 h-[56px] bg-background border-b border-surface-raised z-40 flex items-center justify-between px-lg">
+    <div class="relative">
+      <button id="tenant-btn" class="flex items-center gap-xs px-sm py-1 bg-surface-raised rounded border border-surface-variant cursor-pointer hover:border-primary transition-colors">
+        <span class="text-status-label text-text-muted">TENANT:</span>
+        <span id="tenant-label" class="text-body-sm font-semibold text-on-surface">Acme Corp</span>
+        <span class="material-symbols-outlined text-[16px] text-text-muted">expand_more</span>
+      </button>
+      <div id="tenant-menu" class="hidden absolute left-0 top-full mt-xs w-[200px] bg-surface-container border border-surface-variant rounded shadow-xl overflow-hidden z-50">
+        <button data-tenant="acme"   data-name="Acme Corp"          class="tenant-opt w-full text-left px-md py-sm text-body-sm hover:bg-surface-raised transition-colors cursor-pointer">Acme Corp <span class="font-data-mono text-text-muted text-status-label">acme</span></button>
+        <button data-tenant="globex" data-name="Globex Corporation" class="tenant-opt w-full text-left px-md py-sm text-body-sm hover:bg-surface-raised transition-colors cursor-pointer">Globex Corporation <span class="font-data-mono text-text-muted text-status-label">globex</span></button>
+      </div>
+    </div>
+    <div class="flex items-center gap-lg">
+      <div id="conn-badge" class="flex items-center gap-xs px-md py-1 rounded-full border border-text-muted/30 bg-text-muted/10">
+        <span id="conn-dot" class="w-1.5 h-1.5 rounded-full bg-text-muted"></span>
+        <span id="conn-text" class="font-data-mono text-status-label text-text-muted tracking-widest">CHECKING</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="pt-[56px] h-screen">
+
+  <!-- ═══════════ VIEW: SUBMIT ═══════════ -->
+  <section id="view-submit" class="h-[calc(100vh-56px)] p-lg">
+    <div class="flex flex-col lg:flex-row h-full gap-lg">
+
+      <!-- Left: form -->
+      <div class="w-full lg:w-[40%] flex flex-col">
+        <div class="bg-[#0F172A] rounded p-lg flex flex-col gap-lg flex-grow min-h-0">
+          <div class="flex flex-col gap-xs">
+            <h1 class="font-headline-md text-on-surface">New Support Request</h1>
+            <p class="font-body-sm text-text-muted">Draft inquiry on behalf of customer.</p>
+          </div>
+          <form id="ticket-form" class="flex flex-col gap-md flex-grow min-h-0">
+            <div class="flex flex-col gap-xs">
+              <label class="font-data-mono text-status-label text-text-muted tracking-widest uppercase" for="subject">Subject</label>
+              <input id="subject" required type="text" placeholder="Refund request"
+                class="w-full bg-[#020617] text-on-surface font-body-md px-sm py-sm rounded focus:outline-none focus:ring-1 focus:ring-primary"/>
+            </div>
+            <div class="flex flex-col gap-xs flex-grow min-h-0">
+              <label class="font-data-mono text-status-label text-text-muted tracking-widest uppercase" for="message">Message</label>
+              <textarea id="message" required placeholder="Describe the customer's question in their own words..."
+                class="w-full flex-grow min-h-[160px] bg-[#020617] text-on-surface font-body-md px-md py-md rounded resize-none focus:outline-none focus:ring-1 focus:ring-primary"></textarea>
+            </div>
+            <div class="flex items-center gap-sm pt-md">
+              <button id="submit-btn" type="submit"
+                class="bg-primary text-background font-body-md font-semibold px-md py-sm rounded hover:bg-primary-container transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                Submit Ticket
+              </button>
+              <button id="resend-btn" type="button" disabled title="Re-sends the last ticket with the same Idempotency-Key"
+                class="bg-transparent text-text-muted font-body-md px-md py-sm rounded hover:bg-[#1E293B] hover:text-on-surface transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                Resend (test duplicate)
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Right: live resolution -->
+      <div class="w-full lg:w-[60%] flex flex-col min-h-0">
+        <div id="res-card" class="bg-[#0F172A] rounded flex flex-col h-full relative overflow-hidden">
+          <div id="res-accent" class="absolute left-0 top-0 bottom-0 w-[2px] bg-surface-raised"></div>
+          <div class="flex flex-col p-lg lg:p-xl gap-lg h-full ml-[2px] min-h-0">
+            <div class="flex items-center justify-between border-b border-[#1E293B] pb-md flex-shrink-0">
+              <div class="flex items-center gap-sm">
+                <span id="res-icon" class="material-symbols-outlined text-text-muted">pending</span>
+                <h2 class="font-headline-md text-on-surface">Resolution Preview</h2>
+              </div>
+              <div id="res-badge" class="rounded-full px-sm py-xs border border-surface-variant bg-surface-raised">
+                <span class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Idle</span>
+              </div>
+            </div>
+            <div id="res-body" class="flex flex-col gap-lg flex-grow min-h-0 overflow-y-auto"></div>
+            <div id="res-footer" class="hidden flex-col sm:flex-row sm:items-center justify-between pt-md border-t border-[#1E293B] flex-shrink-0 gap-sm"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════ VIEW: QUEUE ═══════════ -->
+  <section id="view-queue" class="hidden h-[calc(100vh-56px)] flex-col">
+    <div class="px-md py-sm flex items-center justify-between border-b border-surface-raised flex-shrink-0">
+      <div id="filters" class="flex items-center gap-xs overflow-x-auto">
+        <button data-status=""           class="filter-chip px-md py-xs rounded-full font-body-sm whitespace-nowrap transition-colors cursor-pointer">All</button>
+        <button data-status="pending"    class="filter-chip px-md py-xs rounded-full font-body-sm whitespace-nowrap transition-colors cursor-pointer flex items-center gap-xs"><span class="w-2 h-2 rounded-full bg-status-pending"></span>Pending</button>
+        <button data-status="resolve"    class="filter-chip px-md py-xs rounded-full font-body-sm whitespace-nowrap transition-colors cursor-pointer flex items-center gap-xs"><span class="w-2 h-2 rounded-full bg-status-resolved"></span>Resolved</button>
+        <button data-status="escalate"   class="filter-chip px-md py-xs rounded-full font-body-sm whitespace-nowrap transition-colors cursor-pointer flex items-center gap-xs"><span class="w-2 h-2 rounded-full bg-status-escalated"></span>Escalated</button>
+        <button data-status="need_info"  class="filter-chip px-md py-xs rounded-full font-body-sm whitespace-nowrap transition-colors cursor-pointer flex items-center gap-xs"><span class="w-2 h-2 rounded-full bg-status-info"></span>Needs Info</button>
+      </div>
+      <button id="refresh-btn" title="Reload tickets" class="p-xs rounded text-text-muted hover:bg-surface-raised hover:text-on-surface transition-colors cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">refresh</span>
+      </button>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden relative min-h-0">
+      <div class="flex-1 overflow-y-auto">
+        <table class="w-full text-left border-collapse table-fixed">
+          <thead class="sticky top-0 bg-surface-container z-10">
+            <tr>
+              <th class="w-20 px-md py-sm font-data-mono text-status-label text-text-muted font-normal uppercase tracking-widest border-b border-surface-raised">ID</th>
+              <th class="px-md py-sm font-body-sm text-text-muted font-normal border-b border-surface-raised">Subject</th>
+              <th class="w-32 px-md py-sm font-body-sm text-text-muted font-normal border-b border-surface-raised">Status</th>
+              <th class="w-36 px-md py-sm font-data-mono text-status-label text-text-muted font-normal uppercase tracking-widest border-b border-surface-raised text-right">Confidence</th>
+              <th class="w-28 px-md py-sm font-data-mono text-status-label text-text-muted font-normal uppercase tracking-widest border-b border-surface-raised text-right">Created</th>
+            </tr>
+          </thead>
+          <tbody id="queue-rows"></tbody>
+        </table>
+        <div id="queue-empty" class="hidden flex-col items-center justify-center h-64 opacity-60">
+          <span class="material-symbols-outlined text-[48px] text-text-muted mb-md font-light">inbox</span>
+          <h3 class="font-headline-md text-on-surface mb-xs">No tickets yet</h3>
+          <p class="font-data-mono text-body-sm text-text-muted">Submitted tickets for this tenant will appear here.</p>
+        </div>
+      </div>
+
+      <!-- Detail drawer -->
+      <div id="drawer" class="w-[480px] bg-surface-container border-l border-surface-raised flex-shrink-0 transition-transform duration-300 transform translate-x-full absolute right-0 top-0 bottom-0 z-20 flex flex-col shadow-xl">
+        <div id="drawer-head" class="p-lg border-b border-surface-raised flex items-start justify-between bg-surface-container-highest relative overflow-hidden"></div>
+        <div id="drawer-body" class="flex-1 overflow-y-auto p-lg flex flex-col gap-lg"></div>
+      </div>
+    </div>
+  </section>
+
+  </main>
+</div>
+
+<script>
+"use strict";
+
+/* ─────────── config / state ─────────── */
+const API = window.location.origin;          // served same-origin from /ui
+const THRESHOLD = 0.72;                      // mirrors app/pipeline.py CONFIDENCE_THRESHOLD
+
+const state = {
+  tenant: "acme",
+  tenantName: "Acme Corp",
+  view: "submit",
+  filter: "",
+  tickets: [],
+  lastKey: null,        // Idempotency-Key of the last submit, for "Resend"
+  lastPayload: null,
+  ws: null,
+};
+
+const STATUS = {
+  pending:   { label:"PENDING",    color:"status-pending",   icon:"pending",      hex:"#3B82F6" },
+  resolve:   { label:"RESOLVED",   color:"status-resolved",  icon:"check_circle", hex:"#22C55E" },
+  escalate:  { label:"ESCALATED",  color:"status-escalated", icon:"error",        hex:"#DC2626" },
+  need_info: { label:"NEEDS INFO", color:"status-info",      icon:"help",         hex:"#F59E0B" },
+};
+
+/* ─────────── helpers ─────────── */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const meta = (s) => STATUS[s] || { label:String(s||"?").toUpperCase(), color:"text-muted", icon:"help", hex:"#64748B" };
+
+function relTime(iso) {
+  if (!iso) return "—";
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs/60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs/3600)}h ago`;
+  return `${Math.floor(secs/86400)}d ago`;
+}
+
+function uuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+    const r = Math.random()*16|0; return (c === "x" ? r : (r&0x3|0x8)).toString(16);
+  });
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { "Content-Type":"application/json", "X-Tenant-ID": state.tenant, ...(opts.headers||{}) },
+  });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON error body */ }
+  if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
+  return { data, status: res.status };
+}
+
+function setConn(ok, label) {
+  const [badge, dot, txt] = [$("conn-badge"), $("conn-dot"), $("conn-text")];
+  const on = ok ? "status-resolved" : "status-escalated";
+  badge.className = `flex items-center gap-xs px-md py-1 rounded-full border border-${on}/30 bg-${on}/10`;
+  dot.className = `w-1.5 h-1.5 rounded-full bg-${on}` + (ok ? " animate-pulse" : "");
+  txt.className = `font-data-mono text-status-label text-${on} tracking-widest`;
+  txt.textContent = label;
+}
+
+/* ─────────── shared components ─────────── */
+function badgeHTML(status) {
+  const m = meta(status);
+  return `<div class="inline-flex items-center px-2 py-0.5 rounded border border-${m.color}/50 bg-${m.color}/10">
+            <span class="font-data-mono text-status-label text-${m.color}">${m.label}</span></div>`;
+}
+
+// Confidence meter with the 0.72 auto-resolve threshold tick — the single most
+// important element in this UI: it shows *why* a verdict came out the way it did.
+function meterHTML(confidence, status) {
+  const pct = Math.round(confidence * 100);
+  const m = meta(status);
+  return `
+    <div class="flex flex-col gap-xs">
+      <div class="flex justify-between items-end">
+        <span class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Model confidence</span>
+        <span class="font-data-mono text-body-md text-${m.color}">${confidence.toFixed(2)}</span>
+      </div>
+      <div class="relative h-2 w-full bg-[#020617] rounded-full overflow-hidden">
+        <div class="absolute top-0 left-0 h-full bg-${m.color} rounded-full" style="width:${pct}%"></div>
+        <div class="absolute top-0 bottom-0 w-[2px] bg-on-surface/70 z-10" style="left:${THRESHOLD*100}%"></div>
+      </div>
+      <div class="relative w-full h-4">
+        <div class="absolute -translate-x-1/2 flex flex-col items-center" style="left:${THRESHOLD*100}%">
+          <div class="w-px h-1 bg-text-muted"></div>
+          <span class="font-data-mono text-[9px] text-text-muted whitespace-nowrap">0.72 THRESHOLD</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function citationsHTML(citations) {
+  if (!citations || !citations.length) {
+    return `<span class="font-data-mono text-status-label text-text-muted">none cited</span>`;
+  }
+  return citations.map(c =>
+    `<span class="bg-[#1E293B] text-text-primary font-data-mono text-status-label px-xs py-[2px] rounded">#${esc(c)}</span>`
+  ).join("");
+}
+
+/* ─────────── submit view ─────────── */
+function resetResolution() {
+  $("res-accent").className = "absolute left-0 top-0 bottom-0 w-[2px] bg-surface-raised";
+  $("res-icon").className = "material-symbols-outlined text-text-muted";
+  $("res-icon").textContent = "pending";
+  $("res-badge").className = "rounded-full px-sm py-xs border border-surface-variant bg-surface-raised";
+  $("res-badge").innerHTML = `<span class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Idle</span>`;
+  $("res-body").innerHTML = `<div class="flex flex-col items-center justify-center h-full gap-sm text-center opacity-60">
+      <span class="material-symbols-outlined text-[40px] text-text-muted font-light">bolt</span>
+      <p class="font-body-sm text-text-muted">Submit a ticket to see the copilot's verdict here.</p></div>`;
+  $("res-footer").classList.add("hidden");
+  $("res-footer").classList.remove("flex");
+}
+
+function renderPending(ticketId, requestId) {
+  $("res-accent").className = "absolute left-0 top-0 bottom-0 w-[2px] bg-status-pending";
+  $("res-icon").className = "material-symbols-outlined text-status-pending animate-pulse";
+  $("res-icon").textContent = "pending";
+  $("res-badge").className = "rounded-full px-sm py-xs border border-status-pending/50 bg-status-pending/10";
+  $("res-badge").innerHTML = `<span class="font-data-mono text-status-label text-status-pending tracking-widest uppercase">Pending</span>`;
+  $("res-body").innerHTML = `
+    <div class="flex flex-col gap-md">
+      <div class="flex items-center gap-sm">
+        <span class="w-1.5 h-1.5 rounded-full bg-status-pending animate-pulse"></span>
+        <span class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Analyzing — retrieval + generation running</span>
+      </div>
+      <div class="bg-[#020617] p-md rounded flex flex-col gap-sm">
+        <div class="skel h-3 bg-surface-raised rounded w-[85%]"></div>
+        <div class="skel h-3 bg-surface-raised rounded w-[95%]"></div>
+        <div class="skel h-3 bg-surface-raised rounded w-[70%]"></div>
+        <div class="skel h-3 bg-surface-raised rounded w-[90%]"></div>
+      </div>
+      <div class="skel h-2 bg-surface-raised rounded w-full mt-md"></div>
+    </div>`;
+  $("res-footer").classList.remove("hidden");
+  $("res-footer").classList.add("flex");
+  $("res-footer").innerHTML = `<span class="font-data-mono text-status-label text-text-muted uppercase tracking-widest">
+      ticket ${esc(ticketId)}${requestId ? ` &middot; req ${esc(String(requestId).slice(0,8))}` : ""}</span>`;
+}
+
+function renderResolution(ticketId, status, resolution, requestId, duplicate) {
+  const m = meta(status);
+  $("res-accent").className = `absolute left-0 top-0 bottom-0 w-[2px] bg-${m.color}`;
+  $("res-icon").className = `material-symbols-outlined text-${m.color}`;
+  $("res-icon").textContent = m.icon;
+  $("res-badge").className = `rounded-full px-sm py-xs border border-${m.color}/50 bg-${m.color}/10`;
+  $("res-badge").innerHTML = `<span class="font-data-mono text-status-label text-${m.color} tracking-widest uppercase">${m.label}</span>`;
+
+  if (!resolution) {
+    $("res-body").innerHTML = `<p class="font-body-sm text-text-muted">No resolution payload returned.</p>`;
+    return;
+  }
+
+  const dupBanner = duplicate ? `
+    <div class="flex items-start gap-sm bg-status-info/10 border border-status-info/40 rounded p-md">
+      <span class="material-symbols-outlined text-status-info text-[18px]">content_copy</span>
+      <div class="flex flex-col gap-xs">
+        <span class="font-data-mono text-status-label text-status-info tracking-widest uppercase">Duplicate detected</span>
+        <span class="font-body-sm text-on-surface/80">Same <span class="font-data-mono">Idempotency-Key</span> — the original result was returned (HTTP 200). No new work was queued.</span>
+      </div>
+    </div>` : "";
+
+  const escalation = resolution.escalation_reason ? `
+    <div class="bg-surface rounded-lg border border-${m.color}/30 p-md relative overflow-hidden">
+      <div class="absolute left-0 top-0 bottom-0 w-1 bg-${m.color}"></div>
+      <h4 class="font-data-mono text-status-label text-${m.color} tracking-widest uppercase mb-sm">Escalation trigger</h4>
+      <p class="font-body-sm text-on-surface">${esc(resolution.escalation_reason)}</p>
+    </div>` : "";
+
+  $("res-body").innerHTML = `
+    ${dupBanner}
+    ${escalation}
+    <div class="flex flex-col gap-md">
+      <h3 class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Generated response</h3>
+      <div class="font-body-lg text-on-surface max-w-[75ch] leading-relaxed bg-[#020617] p-md rounded whitespace-pre-wrap">${esc(resolution.answer)}</div>
+    </div>
+    ${typeof resolution.confidence === "number" ? meterHTML(resolution.confidence, status) : ""}`;
+
+  $("res-footer").classList.remove("hidden");
+  $("res-footer").classList.add("flex");
+  $("res-footer").innerHTML = `
+    <div class="flex items-center gap-sm flex-wrap">
+      <span class="font-data-mono text-status-label text-text-muted uppercase">Sources:</span>
+      <div class="flex gap-xs flex-wrap">${citationsHTML(resolution.citations)}</div>
+    </div>
+    <div class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">
+      ticket ${esc(ticketId)}${requestId ? ` &middot; req ${esc(String(requestId).slice(0,8))}` : ""}</div>`;
+}
+
+/* Open the live websocket for a ticket. Tenant goes in the query string —
+   browsers cannot set headers on a WS handshake (see app/main.py). */
+function watch(ticketId, requestId) {
+  if (state.ws) { try { state.ws.close(); } catch {} state.ws = null; }
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws/tickets/${ticketId}?tenant_id=${encodeURIComponent(state.tenant)}`);
+  state.ws = ws;
+
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.type === "ping") return;                       // 30s heartbeat while still pending
+    if (msg.status && msg.status !== "pending") {
+      renderResolution(ticketId, msg.status, msg.resolution, msg.request_id || requestId, false);
+      loadTickets();                                        // keep sidebar counts honest
+      try { ws.close(); } catch {}
+      state.ws = null;
+    }
+  };
+  ws.onerror = () => setConn(false, "WS ERROR");
+}
+
+async function submitTicket(reuseKey) {
+  const subject = $("subject").value.trim();
+  const body = $("message").value.trim();
+  if (!subject || !body) return;
+
+  const key = reuseKey || uuid();
+  const btn = reuseKey ? $("resend-btn") : $("submit-btn");
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = reuseKey ? "Resending…" : "Submitting…";
+
+  try {
+    const { data, status } = await api("/tickets", {
+      method: "POST",
+      headers: { "Idempotency-Key": key },
+      body: JSON.stringify({ subject, body }),
+    });
+
+    state.lastKey = key;
+    state.lastPayload = { subject, body };
+    $("resend-btn").disabled = false;
+
+    if (status === 200 && data.status === "pending") {
+      // Idempotent replay, but the original is still being worked on — watch it rather
+      // than rendering an empty resolution card.
+      renderPending(data.ticket_id, null);
+      watch(data.ticket_id, null);
+    } else if (status === 200) {
+      // Idempotent replay — server returned the original result without re-queuing.
+      renderResolution(data.ticket_id, data.status, data.resolution, null, true);
+    } else {
+      renderPending(data.ticket_id, data.request_id);
+      watch(data.ticket_id, data.request_id);
+    }
+    loadTickets();
+  } catch (err) {
+    $("res-body").innerHTML = `<div class="bg-status-escalated/10 border border-status-escalated/40 rounded p-md">
+        <p class="font-data-mono text-status-label text-status-escalated tracking-widest uppercase mb-xs">Request failed</p>
+        <p class="font-body-sm text-on-surface">${esc(err.message)}</p></div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = original;
+  }
+}
+
+/* ─────────── queue view ─────────── */
+function rowHTML(t) {
+  const m = meta(t.status);
+  const conf = t.resolution && typeof t.resolution.confidence === "number" ? t.resolution.confidence : null;
+  // A pending ticket has resolution = NULL — there is no confidence yet, so show an em-dash.
+  const confCell = conf === null
+    ? `<span class="font-data-mono text-text-muted">—</span>`
+    : `<div class="flex items-center justify-end gap-2">
+         <div class="w-12 h-1 bg-surface-raised rounded-full overflow-hidden relative">
+           <div class="absolute top-0 bottom-0 w-px bg-text-muted z-10" style="left:${THRESHOLD*100}%"></div>
+           <div class="h-full bg-${m.color}" style="width:${Math.round(conf*100)}%"></div>
+         </div>
+         <span class="font-data-mono text-data-mono text-${m.color}">${conf.toFixed(2)}</span>
+       </div>`;
+  return `<tr data-id="${esc(t.ticket_id)}" class="queue-row h-[48px] group hover:bg-surface-raised/30 cursor-pointer transition-colors border-b border-surface-raised/50">
+      <td class="px-md font-data-mono text-text-muted group-hover:text-primary transition-colors">${esc(t.ticket_id)}</td>
+      <td class="px-md font-body-sm text-on-surface truncate pr-lg relative">
+        <div class="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-[60%] bg-${m.color} opacity-0 group-hover:opacity-100 transition-opacity"></div>
+        ${esc(t.subject)}
+      </td>
+      <td class="px-md">${badgeHTML(t.status)}</td>
+      <td class="px-md text-right">${confCell}</td>
+      <td class="px-md font-data-mono text-data-mono text-text-muted text-right">${esc(relTime(t.created_at))}</td>
+    </tr>`;
+}
+
+async function loadTickets() {
+  try {
+    const { data } = await api("/tickets?limit=100");
+    state.tickets = data || [];
+    setConn(true, "LIVE");
+  } catch (err) {
+    setConn(false, "OFFLINE");
+    state.tickets = [];
+  }
+
+  // Sidebar counts come from the real list, not invented numbers.
+  const by = (s) => state.tickets.filter(t => t.status === s).length;
+  $("count-pending").textContent   = by("pending");
+  $("count-resolved").textContent  = by("resolve");
+  $("count-escalated").textContent = by("escalate");
+  $("count-needinfo").textContent  = by("need_info");
+
+  const shown = state.filter ? state.tickets.filter(t => t.status === state.filter) : state.tickets;
+  $("queue-rows").innerHTML = shown.map(rowHTML).join("");
+  $("queue-empty").classList.toggle("hidden", shown.length > 0);
+  $("queue-empty").classList.toggle("flex", shown.length === 0);
+}
+
+async function openDrawer(ticketId) {
+  const t = state.tickets.find(x => String(x.ticket_id) === String(ticketId));
+  if (!t) return;
+
+  // A row cached as pending may have finished since the list was fetched — re-check
+  // the single ticket so the drawer never shows a stale "still processing".
+  if (t.status === "pending") {
+    try {
+      const { data } = await api(`/tickets/${encodeURIComponent(ticketId)}`);
+      if (data && data.status !== "pending") {
+        t.status = data.status;
+        t.resolution = data.resolution;
+        loadTickets();
+      }
+    } catch { /* keep the cached row */ }
+  }
+
+  const m = meta(t.status);
+  const r = t.resolution;
+
+  $("drawer-head").innerHTML = `
+    <div class="absolute -top-10 -right-10 w-32 h-32 bg-${m.color}/10 rounded-full blur-2xl"></div>
+    <div class="relative z-10 flex flex-col gap-sm">
+      <div class="flex items-center gap-xs">
+        <span class="font-data-mono text-text-muted">#${esc(t.ticket_id)}</span>
+        ${badgeHTML(t.status)}
+      </div>
+      <h2 class="font-headline-md text-on-surface leading-tight">${esc(t.subject)}</h2>
+      <div class="flex items-center gap-sm mt-xs">
+        <span class="font-data-mono text-body-sm text-text-muted flex items-center gap-1">
+          <span class="material-symbols-outlined text-[14px]">schedule</span>${esc(relTime(t.created_at))}</span>
+      </div>
+    </div>
+    <button id="drawer-close" class="p-xs rounded text-text-muted hover:bg-surface-raised transition-colors relative z-10 cursor-pointer">
+      <span class="material-symbols-outlined text-[20px]">close</span></button>`;
+  $("drawer-close").onclick = closeDrawer;
+
+  if (t.status === "pending") {
+    $("drawer-body").innerHTML = `
+      <div class="flex flex-col items-center justify-center gap-sm py-xl opacity-70">
+        <span class="w-2 h-2 rounded-full bg-status-pending animate-pulse"></span>
+        <p class="font-body-sm text-text-muted">Still processing — no resolution yet.</p>
+      </div>`;
+  } else if (!r) {
+    $("drawer-body").innerHTML = `<p class="font-body-sm text-text-muted">No resolution payload stored.</p>`;
+  } else {
+    const escalation = r.escalation_reason ? `
+      <div class="bg-surface rounded-lg border border-${m.color}/30 p-md relative overflow-hidden">
+        <div class="absolute left-0 top-0 bottom-0 w-1 bg-${m.color}"></div>
+        <h4 class="font-data-mono text-status-label text-${m.color} tracking-widest uppercase mb-sm">Escalation trigger</h4>
+        <p class="font-body-sm text-on-surface mb-md">${esc(r.escalation_reason)}</p>
+        <div class="border-t border-surface-raised pt-sm">${typeof r.confidence === "number" ? meterHTML(r.confidence, t.status) : ""}</div>
+      </div>` : "";
+
+    $("drawer-body").innerHTML = `
+      ${escalation}
+      <div class="flex flex-col gap-sm">
+        <h4 class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Customer message</h4>
+        <div class="bg-surface rounded-lg p-md border border-surface-raised text-body-sm text-on-surface/90 leading-relaxed whitespace-pre-wrap">${esc(t.body || t.subject)}</div>
+      </div>
+      <div class="flex flex-col gap-sm">
+        <h4 class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Generated response</h4>
+        <div class="bg-surface rounded-lg p-md border border-surface-raised text-body-sm text-on-surface leading-relaxed whitespace-pre-wrap">${esc(r.answer)}</div>
+      </div>
+      ${!escalation && typeof r.confidence === "number" ? meterHTML(r.confidence, t.status) : ""}
+      <div class="flex flex-col gap-sm pt-md border-t border-surface-raised">
+        <h4 class="font-data-mono text-status-label text-text-muted tracking-widest uppercase">Retrieved sources</h4>
+        <div class="flex gap-xs flex-wrap">${citationsHTML(r.citations)}</div>
+      </div>`;
+  }
+  $("drawer").classList.remove("translate-x-full");
+}
+
+function closeDrawer() { $("drawer").classList.add("translate-x-full"); }
+
+/* ─────────── view switching ─────────── */
+function setView(view) {
+  state.view = view;
+  $("view-submit").classList.toggle("hidden", view !== "submit");
+  $("view-queue").classList.toggle("hidden", view !== "queue");
+  $("view-queue").classList.toggle("flex", view === "queue");
+  document.querySelectorAll(".nav-link").forEach(a => {
+    const active = a.dataset.view === view;
+    a.className = "nav-link flex items-center px-md py-sm rounded transition-colors cursor-pointer " +
+      (active ? "bg-surface-raised text-on-surface" : "text-text-muted hover:bg-surface-raised/50 hover:text-on-surface");
+  });
+  if (view === "queue") { closeDrawer(); loadTickets(); }
+}
+
+/* ─────────── wiring ─────────── */
+document.querySelectorAll(".nav-link").forEach(a =>
+  a.addEventListener("click", e => { e.preventDefault(); setView(a.dataset.view); }));
+
+$("ticket-form").addEventListener("submit", e => { e.preventDefault(); submitTicket(null); });
+$("resend-btn").addEventListener("click", () => { if (state.lastKey) submitTicket(state.lastKey); });
+$("refresh-btn").addEventListener("click", loadTickets);
+
+$("tenant-btn").addEventListener("click", e => { e.stopPropagation(); $("tenant-menu").classList.toggle("hidden"); });
+document.addEventListener("click", () => $("tenant-menu").classList.add("hidden"));
+document.querySelectorAll(".tenant-opt").forEach(btn =>
+  btn.addEventListener("click", () => {
+    state.tenant = btn.dataset.tenant;
+    state.tenantName = btn.dataset.name;
+    $("tenant-label").textContent = state.tenantName;
+    $("tenant-menu").classList.add("hidden");
+    // Switching tenants resets the whole workspace — nothing crosses the boundary.
+    if (state.ws) { try { state.ws.close(); } catch {} state.ws = null; }
+    state.lastKey = null; $("resend-btn").disabled = true;
+    closeDrawer(); resetResolution(); loadTickets();
+  }));
+
+function renderFilterChips() {
+  document.querySelectorAll(".filter-chip").forEach(c => {
+    const active = c.dataset.status === state.filter;
+    const dot = c.querySelector("span.rounded-full");
+    c.className = "filter-chip px-md py-xs rounded-full font-body-sm whitespace-nowrap transition-colors cursor-pointer " +
+      (dot ? "flex items-center gap-xs " : "") +
+      (active ? "bg-surface-raised text-on-surface" : "text-text-muted hover:text-on-surface");
+  });
+}
+
+$("filters").addEventListener("click", e => {
+  const chip = e.target.closest(".filter-chip");
+  if (!chip) return;
+  state.filter = chip.dataset.status;
+  renderFilterChips();
+  loadTickets();
+});
+
+$("queue-rows").addEventListener("click", e => {
+  const row = e.target.closest(".queue-row");
+  if (row) openDrawer(row.dataset.id);
+});
+
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+
+/* ─────────── boot ─────────── */
+setView("submit");
+resetResolution();
+renderFilterChips();
+loadTickets();
+</script>
+</body>
+</html>

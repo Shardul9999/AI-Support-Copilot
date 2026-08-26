@@ -1,0 +1,281 @@
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"on-error-container":"#ffdad6","on-tertiary":"#472a00","secondary":"#adc6ff","error-container":"#93000a","secondary-container":"#0566d9","on-primary-container":"#004b1e","primary":"#4be277","on-tertiary-fixed":"#2a1700","on-primary":"#003915","surface-variant":"#2d3449","on-tertiary-container":"#5c3800","text-muted":"#64748B","inverse-surface":"#dae2fd","text-primary":"#F8FAFC","on-surface-variant":"#bccbb9","on-surface":"#dae2fd","status-pending":"#3B82F6","status-escalated":"#DC2626","inverse-primary":"#006e2f","on-background":"#dae2fd","primary-container":"#22c55e","inverse-on-surface":"#283044","on-primary-fixed-variant":"#005321","outline":"#869585","tertiary-fixed":"#ffddb8","surface":"#0b1326","surface-raised":"#1E293B","on-error":"#690005","outline-variant":"#3d4a3d","status-resolved":"#22C55E","background":"#020617","on-secondary":"#002e6a","on-secondary-container":"#e6ecff","status-info":"#F59E0B","on-secondary-fixed-variant":"#004395","surface-container-low":"#131b2e","tertiary-container":"#ef9900","surface-container-highest":"#2d3449","surface-tint":"#4ae176","primary-fixed":"#6bff8f","on-primary-fixed":"#002109","on-tertiary-fixed-variant":"#653e00","secondary-fixed-dim":"#adc6ff","error":"#ffb4ab","secondary-fixed":"#d8e2ff","surface-container-high":"#222a3d","tertiary":"#ffba61","surface-dim":"#0b1326","surface-container":"#171f33","surface-bright":"#31394d","tertiary-fixed-dim":"#ffb95f","on-secondary-fixed":"#001a42","surface-container-lowest":"#060e20","primary-fixed-dim":"#4ae176"},"borderRadius":{"DEFAULT":"0.25rem","lg":"0.5rem","xl":"0.75rem","full":"9999px"},"spacing":{"xl":"32px","md":"16px","unit":"8px","margin":"24px","xs":"4px","lg":"24px","gutter":"16px","sm":"8px"},"fontFamily":{"body-lg":["Fira Sans"],"body-md":["Fira Sans"],"status-label":["Fira Code"],"data-mono":["Fira Code"],"body-sm":["Fira Sans"],"headline-md":["Fira Sans"],"headline-lg":["Fira Sans"]},"fontSize":{"body-lg":["16px",{"lineHeight":"24px","fontWeight":"400"}],"body-md":["14px",{"lineHeight":"20px","fontWeight":"400"}],"status-label":["11px",{"lineHeight":"12px","letterSpacing":"0.05em","fontWeight":"600"}],"data-mono":["13px",{"lineHeight":"16px","fontWeight":"450"}],"body-sm":["13px",{"lineHeight":"18px","fontWeight":"400"}],"headline-md":["20px",{"lineHeight":"28px","fontWeight":"600"}],"headline-lg":["24px",{"lineHeight":"32px","fontWeight":"600"}]}}}}</script><link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&amp;family=Fira+Sans:wght@400;600&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/></head><body class="bg-background font-body-md text-on-surface"><aside class="fixed left-0 top-0 h-full w-[240px] bg-background border-r border-surface-raised z-50 flex flex-col justify-between overflow-hidden"><div class="flex flex-col h-full"><div class="px-lg pt-lg mb-xl"><div class="flex items-center gap-xs"><span class="material-symbols-outlined text-primary text-[20px]">grid_view</span><span class="font-data-mono text-body-md tracking-widest text-primary uppercase">Support Copilot</span></div></div><nav class="flex flex-col gap-xs px-sm" data-active-classes="bg-surface-raised text-on-surface"><a class="flex items-center px-md py-sm rounded text-text-muted hover:bg-surface-raised/50 hover:text-on-surface transition-colors group" data-path="submit-ticket" href="#"><span class="material-symbols-outlined mr-sm text-[20px]">add_box</span><span class="font-body-md">Submit Ticket</span></a><a aria-current="page" class="flex items-center px-md py-sm rounded transition-colors bg-surface-raised text-on-surface" data-path="ticket-queue" href="#"><span class="material-symbols-outlined mr-sm text-[20px]">list</span><span class="font-body-md">Ticket Queue</span></a></nav><div class="mt-xl pt-lg border-t border-surface-raised px-lg flex flex-col gap-sm"><div class="flex justify-between font-data-mono text-status-label"><span class="text-status-pending">PENDING</span><span class="text-on-surface">12</span></div><div class="flex justify-between font-data-mono text-status-label"><span class="text-status-resolved">RESOLVED</span><span class="text-on-surface">144</span></div><div class="flex justify-between font-data-mono text-status-label"><span class="text-status-escalated">ESCALATED</span><span class="text-on-surface">03</span></div></div></div><div class="p-lg border-t border-surface-raised flex items-center gap-sm"><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div><div class="flex flex-col overflow-hidden"><span class="text-body-sm font-semibold truncate">Agent Alpha</span><span class="text-status-label text-text-muted">SUPPORT OPS</span></div></div></aside><div class="pl-[240px]"><header class="fixed top-0 left-[240px] right-0 h-[56px] bg-background border-b border-surface-raised z-40 flex items-center justify-between px-lg"><div class="flex items-center gap-md"><div class="flex items-center gap-xs px-sm py-1 bg-surface-raised rounded border border-surface-variant cursor-pointer group hover:border-primary transition-colors"><span class="text-status-label text-text-muted">TENANT:</span><span class="text-body-sm font-semibold text-on-surface">Acme Inc</span><span class="material-symbols-outlined text-[16px] text-text-muted group-hover:text-primary transition-colors">expand_more</span></div></div><div class="flex items-center gap-lg"><div class="flex items-center gap-xs px-md py-1 rounded-full border border-status-resolved/30 bg-status-resolved/10 shadow-[0_0_8px_rgba(34,197,94,0.2)]"><span class="w-1.5 h-1.5 rounded-full bg-status-resolved animate-pulse"></span><span class="font-data-mono text-status-label text-status-resolved tracking-widest">LIVE</span></div><span class="material-symbols-outlined text-text-muted cursor-pointer hover:text-on-surface">notifications</span></div></header><main class="pt-[56px] min-h-screen"><div class="flex flex-col w-full h-full relative" id="queue-container">
+<!-- Top Bar: Filters -->
+<div class="px-md py-sm flex items-center justify-between z-10 sticky top-[56px]">
+<div class="flex items-center gap-xs overflow-x-auto">
+<button class="px-md py-xs rounded-full border border-surface-raised bg-surface-raised text-on-surface font-body-sm whitespace-nowrap transition-colors">All</button>
+<button class="px-md py-xs rounded-full border border-transparent hover:border-surface-raised text-text-muted hover:text-on-surface font-body-sm whitespace-nowrap transition-colors flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-status-pending"></span> Pending
+      </button>
+<button class="px-md py-xs rounded-full border border-transparent hover:border-surface-raised text-text-muted hover:text-on-surface font-body-sm whitespace-nowrap transition-colors flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-status-resolved"></span> Resolved
+      </button>
+<button class="px-md py-xs rounded-full border border-transparent hover:border-surface-raised text-text-muted hover:text-on-surface font-body-sm whitespace-nowrap transition-colors flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-status-escalated"></span> Escalated
+      </button>
+<button class="px-md py-xs rounded-full border border-transparent hover:border-surface-raised text-text-muted hover:text-on-surface font-body-sm whitespace-nowrap transition-colors flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-status-info"></span> Needs Info
+      </button>
+</div>
+<div class="flex items-center gap-sm">
+<button class="p-xs rounded text-text-muted hover:bg-surface-raised transition-colors group">
+<span class="material-symbols-outlined text-[20px]">filter_list</span>
+</button>
+<button class="p-xs rounded text-text-muted hover:bg-surface-raised transition-colors group">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Main Content Area -->
+<div class="flex flex-1 overflow-hidden relative">
+<!-- Table Container -->
+<div class="flex-1 overflow-y-auto w-full transition-all duration-300" id="table-view">
+<table class="w-full text-left border-collapse table-fixed">
+<thead class="sticky top-0 bg-surface-container z-10">
+<tr>
+<th class="w-16 px-md py-sm font-status-label text-text-muted font-normal uppercase tracking-widest border-b border-surface-raised">ID</th>
+<th class="px-md py-sm font-body-sm text-text-muted font-normal border-b border-surface-raised truncate">Subject</th>
+<th class="w-24 px-md py-sm font-body-sm text-text-muted font-normal border-b border-surface-raised">Status</th>
+<th class="w-32 px-md py-sm font-status-label text-text-muted font-normal uppercase tracking-widest border-b border-surface-raised text-right">Confidence</th>
+<th class="w-24 px-md py-sm font-status-label text-text-muted font-normal uppercase tracking-widest border-b border-surface-raised text-right">Created</th>
+</tr>
+</thead>
+<tbody>
+<!-- Row 1: Resolved -->
+<tr class="h-[48px] group hover:bg-surface-raised/30 cursor-pointer transition-colors border-b border-surface-raised/50" onclick="toggleDrawer()">
+<td class="px-md font-data-mono text-text-muted group-hover:text-primary transition-colors">4029</td>
+<td class="px-md font-body-sm text-on-surface truncate pr-lg relative">
+<!-- Accent bar for status -->
+<div class="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-[60%] bg-status-resolved opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              Billing discrepancy on last invoice
+            </td>
+<td class="px-md">
+<div class="inline-flex items-center px-2 py-0.5 rounded border border-status-resolved/30 bg-status-resolved/10">
+<span class="font-data-mono text-status-label text-status-resolved">RESOLVED</span>
+</div>
+</td>
+<td class="px-md text-right">
+<div class="flex items-center justify-end gap-2">
+<div class="w-12 h-1 bg-surface-raised rounded-full overflow-hidden">
+<div class="h-full bg-status-resolved" style="width: 94%"></div>
+</div>
+<span class="font-data-mono text-data-mono text-status-resolved">.94</span>
+</div>
+</td>
+<td class="px-md font-data-mono text-data-mono text-text-muted text-right">10m ago</td>
+</tr>
+<!-- Row 2: Escalated (Triggers Drawer) -->
+<tr class="h-[48px] group bg-surface-raised/10 hover:bg-surface-raised/30 cursor-pointer transition-colors border-b border-surface-raised/50 relative" onclick="toggleDrawer()">
+<td class="px-md font-data-mono text-text-muted group-hover:text-primary transition-colors">4028</td>
+<td class="px-md font-body-sm text-on-surface font-semibold truncate pr-lg relative">
+<div class="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-[60%] bg-status-escalated opacity-100"></div>
+              Refund requested for damaged item #8992
+            </td>
+<td class="px-md">
+<div class="inline-flex items-center px-2 py-0.5 rounded border border-status-escalated/50 bg-status-escalated/10">
+<span class="font-data-mono text-status-label text-status-escalated">ESCALATED</span>
+</div>
+</td>
+<td class="px-md text-right">
+<div class="flex items-center justify-end gap-2">
+<div class="w-12 h-1 bg-surface-raised rounded-full overflow-hidden relative">
+<!-- Threshold marker -->
+<div class="absolute top-0 bottom-0 left-[72%] w-[1px] bg-text-muted z-10"></div>
+<div class="h-full bg-status-escalated" style="width: 68%"></div>
+</div>
+<span class="font-data-mono text-data-mono text-status-escalated">.68</span>
+</div>
+</td>
+<td class="px-md font-data-mono text-data-mono text-text-muted text-right">14m ago</td>
+</tr>
+<!-- Row 3: Pending -->
+<tr class="h-[48px] group hover:bg-surface-raised/30 cursor-pointer transition-colors border-b border-surface-raised/50" onclick="toggleDrawer()">
+<td class="px-md font-data-mono text-text-muted group-hover:text-primary transition-colors">4027</td>
+<td class="px-md font-body-sm text-on-surface truncate pr-lg relative">
+<div class="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-[60%] bg-status-pending opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              Cannot access account after password reset
+            </td>
+<td class="px-md">
+<div class="inline-flex items-center px-2 py-0.5 rounded border border-status-pending/30 bg-status-pending/10">
+<span class="font-data-mono text-status-label text-status-pending">PENDING</span>
+</div>
+</td>
+<td class="px-md text-right">
+<span class="font-data-mono text-text-muted">—</span>
+</td>
+<td class="px-md font-data-mono text-data-mono text-text-muted text-right">22m ago</td>
+</tr>
+<!-- Row 4: Needs Info -->
+<tr class="h-[48px] group hover:bg-surface-raised/30 cursor-pointer transition-colors border-b border-surface-raised/50" onclick="toggleDrawer()">
+<td class="px-md font-data-mono text-text-muted group-hover:text-primary transition-colors">4026</td>
+<td class="px-md font-body-sm text-on-surface truncate pr-lg relative">
+<div class="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-[60%] bg-status-info opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              Missing dimensions on product spec
+            </td>
+<td class="px-md">
+<div class="inline-flex items-center px-2 py-0.5 rounded border border-status-info/30 bg-status-info/10">
+<span class="font-data-mono text-status-label text-status-info">NEEDS INFO</span>
+</div>
+</td>
+<td class="px-md text-right">
+<div class="flex items-center justify-end gap-2">
+<div class="w-12 h-1 bg-surface-raised rounded-full overflow-hidden">
+<div class="h-full bg-status-info" style="width: 82%"></div>
+</div>
+<span class="font-data-mono text-data-mono text-status-info">.82</span>
+</div>
+</td>
+<td class="px-md font-data-mono text-data-mono text-text-muted text-right">1h ago</td>
+</tr>
+<!-- More rows to fill space -->
+<tr class="h-[48px] group hover:bg-surface-raised/30 cursor-pointer transition-colors border-b border-surface-raised/50">
+<td class="px-md font-data-mono text-text-muted">4025</td>
+<td class="px-md font-body-sm text-on-surface truncate pr-lg">Update shipping address for upcoming order</td>
+<td class="px-md">
+<div class="inline-flex items-center px-2 py-0.5 rounded border border-status-resolved/30 bg-status-resolved/10"><span class="font-data-mono text-status-label text-status-resolved">RESOLVED</span></div>
+</td>
+<td class="px-md text-right">
+<div class="flex items-center justify-end gap-2">
+<div class="w-12 h-1 bg-surface-raised rounded-full overflow-hidden"><div class="h-full bg-status-resolved" style="width: 98%"></div></div>
+<span class="font-data-mono text-data-mono text-status-resolved">.98</span>
+</div>
+</td>
+<td class="px-md font-data-mono text-data-mono text-text-muted text-right">2h ago</td>
+</tr>
+<tr class="h-[48px] group hover:bg-surface-raised/30 cursor-pointer transition-colors border-b border-surface-raised/50">
+<td class="px-md font-data-mono text-text-muted">4024</td>
+<td class="px-md font-body-sm text-on-surface truncate pr-lg">Cancel subscription immediately</td>
+<td class="px-md">
+<div class="inline-flex items-center px-2 py-0.5 rounded border border-status-resolved/30 bg-status-resolved/10"><span class="font-data-mono text-status-label text-status-resolved">RESOLVED</span></div>
+</td>
+<td class="px-md text-right">
+<div class="flex items-center justify-end gap-2">
+<div class="w-12 h-1 bg-surface-raised rounded-full overflow-hidden"><div class="h-full bg-status-resolved" style="width: 89%"></div></div>
+<span class="font-data-mono text-data-mono text-status-resolved">.89</span>
+</div>
+</td>
+<td class="px-md font-data-mono text-data-mono text-text-muted text-right">3h ago</td>
+</tr>
+</tbody>
+</table>
+<!-- Empty State (Hidden by default, shown for demonstration if rows were empty) -->
+<div class="hidden flex-col items-center justify-center h-64 opacity-50">
+<span class="material-symbols-outlined text-[48px] text-text-muted mb-md font-light">inbox</span>
+<h3 class="font-headline-md text-on-surface mb-xs">No tickets yet</h3>
+<p class="font-data-mono text-body-sm text-text-muted">Submitted tickets for this tenant will appear here.</p>
+</div>
+</div>
+<!-- Detail Drawer (Slide-in Right) -->
+<div class="w-[480px] bg-surface-container border-l border-surface-raised flex-shrink-0 transition-transform duration-300 transform translate-x-full absolute right-0 top-0 bottom-0 z-20 flex flex-col shadow-xl" id="detail-drawer">
+<!-- Drawer Header -->
+<div class="p-lg border-b border-surface-raised flex items-start justify-between bg-surface-container-highest relative overflow-hidden">
+<!-- Decorative bg accent -->
+<div class="absolute -top-10 -right-10 w-32 h-32 bg-status-escalated/10 rounded-full blur-2xl"></div>
+<div class="relative z-10 flex flex-col gap-sm">
+<div class="flex items-center gap-xs">
+<span class="font-data-mono text-text-muted">#4028</span>
+<div class="inline-flex items-center px-2 py-0.5 rounded border border-status-escalated/50 bg-status-escalated/10">
+<span class="font-data-mono text-status-label text-status-escalated">ESCALATED</span>
+</div>
+</div>
+<h2 class="font-headline-md text-on-surface leading-tight">Refund requested for damaged item #8992</h2>
+<div class="flex items-center gap-sm mt-xs">
+<span class="font-data-mono text-body-sm text-text-muted flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">person</span> Jane Doe</span>
+<span class="text-surface-raised">•</span>
+<span class="font-data-mono text-body-sm text-text-muted flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span> 14m ago</span>
+</div>
+</div>
+<button class="p-xs rounded text-text-muted hover:bg-surface-raised transition-colors group relative z-10" onclick="toggleDrawer()">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Drawer Body -->
+<div class="flex-1 overflow-y-auto p-lg flex flex-col gap-xl">
+<!-- Escalation Reason Panel -->
+<div class="bg-surface rounded-lg border border-status-escalated/30 p-md relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-status-escalated"></div>
+<h4 class="font-status-label text-status-escalated tracking-widest uppercase mb-sm">Escalation Trigger</h4>
+<p class="font-body-sm text-on-surface mb-md">Low confidence score (<span class="font-data-mono">0.68</span>) detected during automated triage. Human review required for refund authorization.</p>
+<!-- Confidence visualization -->
+<div class="flex flex-col gap-xs mt-4 border-t border-surface-raised pt-sm">
+<div class="flex justify-between font-data-mono text-status-label">
+<span class="text-text-muted">MODEL CONFIDENCE</span>
+<span class="text-status-escalated">68%</span>
+</div>
+<div class="relative h-2 bg-surface-raised rounded-full w-full overflow-hidden">
+<!-- Auto-resolve Threshold Marker -->
+<div class="absolute top-0 bottom-0 left-[72%] w-0.5 bg-text-muted z-10 flex flex-col items-center">
+</div>
+<!-- Fill -->
+<div class="absolute top-0 left-0 bottom-0 bg-status-escalated transition-all duration-1000 w-[68%]"></div>
+</div>
+<div class="relative w-full h-4">
+<div class="absolute left-[72%] top-1 -translate-x-1/2 font-data-mono text-[9px] text-text-muted flex flex-col items-center">
+<div class="w-px h-1 bg-text-muted mb-px"></div>
+                   72% THRESHOLD
+                </div>
+</div>
+</div>
+</div>
+<!-- Message Thread -->
+<div class="flex flex-col gap-lg">
+<!-- Customer Message -->
+<div class="flex gap-md">
+<div class="w-8 h-8 rounded-full bg-surface-raised flex items-center justify-center flex-shrink-0 text-text-muted font-body-sm">JD</div>
+<div class="flex flex-col gap-1 w-full">
+<div class="flex items-baseline justify-between">
+<span class="font-body-sm font-semibold text-on-surface">Jane Doe</span>
+<span class="font-data-mono text-status-label text-text-muted">14m ago</span>
+</div>
+<div class="bg-surface rounded-lg rounded-tl-none p-md border border-surface-raised text-body-sm text-on-surface/90 leading-relaxed">
+                    I received my order today, but item #8992 was completely smashed in the box. The outer packaging looked fine but the inside was a mess. I need a refund immediately, I attached photos to the main form.
+                 </div>
+</div>
+</div>
+<!-- System Note -->
+<div class="flex gap-md opacity-80 pl-8 border-l-2 border-surface-raised ml-4">
+<div class="flex flex-col gap-1 w-full">
+<div class="flex items-baseline gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">robot_2</span>
+<span class="font-body-sm font-semibold text-primary">Copilot Analysis</span>
+<span class="font-data-mono text-status-label text-text-muted">13m ago</span>
+</div>
+<div class="text-body-sm text-text-muted font-data-mono text-xs">
+                    &gt; Entity detected: Item #8992 (Ceramic Vase)<br/>
+                    &gt; Sentiment: Negative, urgent<br/>
+                    &gt; Policy check: Within 30 days return window. High value item ($149.99).<br/>
+                    &gt; Action proposed: Issue full refund. Confidence low due to missing attachment verification.
+                 </div>
+</div>
+</div>
+</div>
+</div>
+<!-- Drawer Footer (Actions) -->
+<div class="p-md border-t border-surface-raised bg-surface-container flex justify-end gap-sm">
+<button class="px-md py-sm rounded border border-surface-raised bg-transparent text-text-muted font-body-sm hover:text-on-surface hover:bg-surface-raised/50 transition-colors">Internal Note</button>
+<button class="px-md py-sm rounded bg-primary text-background font-body-sm font-semibold hover:bg-primary/90 transition-colors">Resolve &amp; Refund</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+  let drawerOpen = false;
+  function toggleDrawer() {
+    const drawer = document.getElementById('detail-drawer');
+    const tableContainer = document.getElementById('table-view');
+    drawerOpen = !drawerOpen;
+    
+    if (drawerOpen) {
+      drawer.classList.remove('translate-x-full');
+      // tableContainer.classList.add('mr-[480px]'); // Optional: squeeze table
+    } else {
+      drawer.classList.add('translate-x-full');
+      // tableContainer.classList.remove('mr-[480px]');
+    }
+  }
+  
+  // Open drawer by default for demonstration of the escalated state
+  setTimeout(() => {
+     toggleDrawer();
+  }, 300);
+</script></main></div></body></html>

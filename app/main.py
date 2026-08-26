@@ -1,6 +1,7 @@
 # app/main.py  —  pip install -r requirements.txt
 import asyncio
 import contextlib
+import pathlib
 import uuid
 
 from dotenv import load_dotenv
@@ -8,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()  # must run before any app-local import that reads env vars at module load time (embed.py, session.py)
 
 from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 
 from app.db.session import get_connection
 from app.models import Ticket
@@ -101,6 +103,54 @@ def handle_ticket(
     return {"ticket_id": ticket_id, "status": "pending", "request_id": request_id}
 
 
+@app.get("/tickets")
+def list_tickets(
+    tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID"),
+    status: str | None = None,
+    limit: int = 50,
+):
+    with get_connection(tenant_id) as conn:
+        with conn.cursor() as cur:
+            if not _tenant_exists(cur, tenant_id):
+                raise HTTPException(status_code=400, detail=f"unknown tenant: {tenant_id!r}")
+
+            if status:
+                cur.execute(
+                    """
+                    SELECT id, subject, body, status, resolution, created_at
+                    FROM tickets
+                    WHERE tenant_id = %s AND status = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (tenant_id, status, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, subject, body, status, resolution, created_at
+                    FROM tickets
+                    WHERE tenant_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (tenant_id, limit),
+                )
+            rows = cur.fetchall()
+
+    return [
+        {
+            "ticket_id": row[0],
+            "subject": row[1],
+            "body": row[2],
+            "status": row[3],
+            "resolution": row[4],
+            "created_at": row[5].isoformat(),
+        }
+        for row in rows
+    ]
+
+
 @app.get("/tickets/{ticket_id}")
 def get_ticket(ticket_id: int, tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID")):
     with get_connection(tenant_id) as conn:
@@ -122,7 +172,10 @@ def get_ticket(ticket_id: int, tenant_id: str = Header(default=DEFAULT_TENANT, a
 
 @app.websocket("/ws/tickets/{ticket_id}")
 async def watch_ticket(websocket: WebSocket, ticket_id: int):
-    tenant_id = websocket.headers.get("x-tenant-id", DEFAULT_TENANT)
+    # Browsers can't set custom headers on a WebSocket handshake (the JS WebSocket
+    # constructor has no header API), so the browser UI passes ?tenant_id=... instead.
+    # The header path stays first so scripts/watch_ticket.py keeps working unchanged.
+    tenant_id = websocket.headers.get("x-tenant-id") or websocket.query_params.get("tenant_id") or DEFAULT_TENANT
     await websocket.accept()
 
     with get_connection(tenant_id) as conn:
@@ -190,3 +243,10 @@ async def watch_ticket(websocket: WebSocket, ticket_id: int):
         # client is already gone. Either way, closing an already-gone connection isn't an error.
         with contextlib.suppress(RuntimeError, WebSocketDisconnect):
             await websocket.close()
+
+
+# Mounted last so it can never shadow an API route. Serving the UI from the API's own
+# origin keeps fetch() and the websocket same-origin, so no CORS config is needed.
+# Path is resolved from this file, not the cwd, so it works wherever uvicorn is started.
+_FRONTEND_DIR = pathlib.Path(__file__).resolve().parent.parent / "frontend"
+app.mount("/ui", StaticFiles(directory=_FRONTEND_DIR, html=True), name="ui")

@@ -90,7 +90,7 @@ uvicorn app.main:app --reload --port 8000
 celery -A app.tasks.celery_app worker --loglevel=info --pool=solo   # --pool=solo required on Windows
 ```
 
-The API is now live at `http://127.0.0.1:8000` (use `127.0.0.1`, not `localhost` — see [DECISIONS.md](DECISIONS.md) for a local port-binding quirk this sidesteps).
+The API is now live at `http://127.0.0.1:8000` (use `127.0.0.1`, not `localhost` — see [DECISIONS.md](DECISIONS.md) for a local port-binding quirk this sidesteps), and the web UI at `http://127.0.0.1:8000/ui/`.
 
 ## Try it
 
@@ -108,6 +108,19 @@ curl -s http://127.0.0.1:8000/tickets/1 -H "X-Tenant-ID: acme"
 # Or watch it resolve live over the websocket instead of polling
 python -m scripts.watch_ticket 1 ws://localhost:8000 acme
 ```
+
+## Web UI
+
+A browser UI is served by the API itself at **`http://127.0.0.1:8000/ui/`** (no build step, no separate server — it's a single static page mounted from [`frontend/`](frontend/)).
+
+It has two screens:
+
+- **Submit Ticket** — subject + message, with the resolution streaming in live over the WebSocket. Renders all four terminal states (`resolve` / `escalate` / `need_info`, plus `pending` while the worker runs), the model's confidence against a marked **0.72 auto-resolve threshold**, the knowledge-chunk IDs actually cited, and the `request_id` for tracing. A "Resend (test duplicate)" button replays the last submission with the same `Idempotency-Key` so the dedup path is visible in the UI.
+- **Ticket Queue** — the tenant's tickets with status/confidence/created columns and status filters, plus a detail drawer showing the full resolution. Pending tickets show `—` for confidence rather than a number, because `resolution` is `NULL` until the worker finishes.
+
+The tenant switcher in the header reloads the entire workspace against the selected tenant — the fastest way to *show* RLS isolation rather than describe it.
+
+Because the page is served from the API's own origin, `fetch` and the WebSocket are same-origin and no CORS configuration is needed. The UI is a demo client: there is no auth, and the tenant is chosen from a dropdown rather than derived from a session.
 
 See [DEMO.md](DEMO.md) for a full walkthrough script covering every engineering property (async processing, idempotency, tenant isolation, semantic cache, escalation, tracing) with exact commands and expected output — written for a live demo, not just a quick smoke test.
 

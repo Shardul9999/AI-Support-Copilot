@@ -27,6 +27,16 @@ celery_app.conf.update(
     # a crashed worker's in-flight job would otherwise sit stuck for up to an hour). Set just
     # above the task's own time_limit=120 so a still-running task isn't redelivered while
     # legitimately in progress, but a genuinely dead worker recovers quickly.
-    broker_transport_options={"visibility_timeout": 130},
+    broker_transport_options={
+        "visibility_timeout": 130,
+        "health_check_interval": 25,
+        "socket_keepalive": True,
+        "retry_on_timeout": True,
+    },
+    redis_backend_transport_options={
+        "health_check_interval": 25,
+        "socket_keepalive": True,
+        "retry_on_timeout": True,
+    },
 )
 # time_limit/max_retries/default_retry_delay are set per-task on process_ticket itself (app/tasks/process_ticket.py)

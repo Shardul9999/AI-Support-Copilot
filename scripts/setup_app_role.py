@@ -28,7 +28,12 @@ ENV_PATH = os.path.join(os.path.dirname(__file__), "..", ".env")
 
 def _build_app_url(admin_url: str, password: str) -> str:
     parts = urlsplit(admin_url)
-    netloc = f"{ROLE}:{password}@{parts.hostname}"
+    user = ROLE
+    if parts.username and "." in parts.username:
+        # Supabase pooler requires <role>.<project-ref> to route properly
+        tenant_suffix = parts.username.split(".", 1)[1]
+        user = f"{ROLE}.{tenant_suffix}"
+    netloc = f"{user}:{password}@{parts.hostname}"
     if parts.port:
         netloc += f":{parts.port}"
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))

@@ -4,6 +4,7 @@ it doesn't even apply to our code: the whole pipeline (embed_query,
 vector_search, keyword_search, rerank, the Groq call) has been synchronous
 since Phase 2, so there's no coroutine to run and no asyncio.run() needed."""
 from app.db.session import get_connection
+from app.models import SupportResolution
 from app.pipeline import resolve_ticket
 from app.realtime.pubsub import publish_ticket_update
 from app.tasks.celery_app import celery_app
@@ -43,7 +44,21 @@ def process_ticket(self, ticket_id: int, tenant_id: str, request_id: str):
             return  # ticket vanished (or tenant mismatch) — nothing to do, don't retry forever on a ghost id
 
         subject, body = row
-        resolution = resolve_ticket(subject, body, tenant_id)
+        try:
+            resolution = resolve_ticket(subject, body, tenant_id)
+        except Exception as exc:
+            if self.request.retries < self.max_retries:
+                log_event("task_retrying", request_id, ticket_id=ticket_id, error=str(exc), retry=self.request.retries + 1)
+                raise
+            # If all retries are exhausted, gracefully escalate instead of leaving the ticket pending forever
+            log_event("task_exhausted_retries", request_id, ticket_id=ticket_id, error=str(exc))
+            resolution = SupportResolution(
+                answer="We encountered a temporary processing issue with your request. It has been escalated directly to a human agent.",
+                citations=[],
+                confidence=0.0,
+                action="escalate",
+                escalation_reason=f"Processing failed after {self.max_retries} retries: {str(exc)[:200]}",
+            )
 
         with get_connection(tenant_id) as conn:
             with conn.cursor() as cur:

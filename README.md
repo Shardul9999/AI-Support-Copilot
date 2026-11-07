@@ -167,7 +167,24 @@ flowchart LR
 | RRF fusion | [fuse.py](app/retrieval/fuse.py) | Cosine (0–1) and `ts_rank_cd` (unbounded) have no principled common scale. RRF merges by **rank** instead of score, so the scales never need reconciling. |
 | Cross-encoder rerank | `ms-marco-MiniLM-L-6-v2` | Reads query and chunk *together* in one pass — far more accurate than scoring each independently, far too slow to run over every chunk. Hence narrow-then-rerank. |
 
-`python -m evals.retrieval_eval` measures precision@5 for vector-only against hybrid+rerank on a labeled question set, so the added complexity has to justify itself with a number.
+### Empirical Retrieval Benchmark (200-Candidate Scaled Corpus)
+
+To eliminate the small-corpus ceiling effect (where top-5 out of 6 documents trivially scores 100%), we scaled the candidate pool to **200 realistic customer support chunks** under tenant `globex` and evaluated **200 paired queries** across all three retrieval strategies:
+
+```bash
+python -m evals.benchmark_retrieval --tenant globex --all
+```
+
+| Method | Hit@1 (Precision@1) | Hit@3 | Hit@5 | MRR (Position Score) | Avg Latency |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **1. Vector-Only (Gemini)** | 98.5% | 100.0% | 100.0% | 0.992 | 5,181.2 ms |
+| **2. Keyword-Only (BM25)** | 97.0% | 99.0% | 100.0% | 0.981 | 4,335.6 ms |
+| **3. Hybrid + Reranker (Cross-Encoder)** | **99.0%** 🏆 | **100.0%** | **100.0%** | **0.995** 🏆 | 9,827.1 ms |
+
+**Key Architectural Takeaways:**
+1. **Accuracy Supremacy**: **Hybrid + Cross-Encoder** is the top-performing strategy. It puts the bullseye answer at Rank #1 in **198 out of 200 queries** (99.0% Hit@1, 0.995 MRR).
+2. **Keyword Fragility**: BM25 keyword search is the weakest alone (97.0% Hit@1, dropping to 99.0% at Hit@3) due to phrasing and synonym mismatch.
+3. **The Production Latency Incentive**: The 9.8s latency in this unoptimized benchmark stems from repeated WAN handshakes to remote Supabase per query and unquantized CPU PyTorch inference. This empirically justifies the connection pooling (`psycopg_pool`) and ONNX quantization roadmap in `PRODUCTION_PLAN.md`.
 
 ## The resolution contract
 
@@ -435,8 +452,9 @@ What happens when each hop breaks, and why it was built that way:
 
 ```bash
 python -m pytest tests/                    # tenant isolation (RLS) + semantic cache correctness
-python -m pytest evals/test_eval.py -v     # 18-case end-to-end accuracy gate (real LLM + embedding calls, ~a few minutes)
-python -m evals.retrieval_eval             # retrieval-only precision@k, vector-only vs hybrid+rerank
+python -m pytest evals/test_eval.py -v     # 18-case end-to-end accuracy gate (real LLM + embedding calls)
+python -m evals.benchmark_retrieval --tenant globex --all  # 200-candidate retrieval benchmark (Hit@1, Hit@5, MRR, Latency)
+python -m evals.retrieval_eval             # legacy 6-doc precision@k benchmark
 ```
 
 All three suites run against the real pipeline — Groq and Gemini calls are not mocked, per this project's own testing discipline (see [DECISIONS.md](DECISIONS.md)). `evals/test_eval.py` clears its tenant's semantic cache before running, so a same-day re-run can't be silently served stale cached answers instead of exercising the live pipeline.

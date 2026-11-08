@@ -1,6 +1,8 @@
 # app/main.py  —  pip install -r requirements.txt
 import asyncio
 import contextlib
+import json
+import os
 import pathlib
 import uuid
 
@@ -8,10 +10,12 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any app-local import that reads env vars at module load time (embed.py, session.py)
 
-from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from app.db.session import get_connection
+from app.db.session import close_pools, get_app_pool, get_connection
+from app.middleware.auth import TenantAuthMiddleware
+from app.middleware.rate_limit import RedisRateLimitMiddleware
 from app.models import Ticket
 from app.realtime import connections
 from app.realtime.pubsub import subscribe_forever
@@ -21,8 +25,19 @@ from app.telemetry.tracing import get_tracer, log_event, new_request_id, setup_t
 setup_tracing("api")
 tracer = get_tracer()
 
-DEFAULT_TENANT = "acme"  # default when a caller doesn't send X-Tenant-ID — keeps pre-Phase-7 demo commands working
 HEARTBEAT_INTERVAL = 30  # seconds between pings while a ticket is still pending
+
+
+def _resolve_request_tenant(request: Request, header_tenant: str | None = None) -> str:
+    """Resolve authenticated tenant_id from request state (set by TenantAuthMiddleware)
+    or explicitly provided header. Rejects requests lacking tenant authentication."""
+    tenant_id = getattr(request.state, "tenant_id", None) or header_tenant
+    if not tenant_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing tenant credentials (provide X-API-Key, Bearer token, or X-Tenant-ID)",
+        )
+    return tenant_id
 
 
 async def _dispatch_update(payload: dict) -> None:
@@ -46,19 +61,63 @@ async def lifespan(app: FastAPI):
     subscriber.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await subscriber
+    close_pools()
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(RedisRateLimitMiddleware)
+app.add_middleware(TenantAuthMiddleware)
+
+
+@app.get("/healthz")
+def healthz():
+    """Liveness probe: verifies process is running and responding."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness probe: validates database connection pool and Redis reachability."""
+    checks = {"database": "ok", "redis": "ok"}
+    status_code = 200
+
+    try:
+        pool = get_app_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+    except Exception as exc:
+        checks["database"] = f"unhealthy: {exc}"
+        status_code = 503
+
+    try:
+        from app.realtime.pubsub import _ssl_kwargs
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(os.environ["REDIS_URL"], **_ssl_kwargs())
+        await client.ping()
+        await client.aclose()
+    except Exception as exc:
+        checks["redis"] = f"unhealthy: {exc}"
+        status_code = 503
+
+    return Response(
+        content=json.dumps(checks),
+        status_code=status_code,
+        media_type="application/json",
+    )
 
 
 @app.post("/tickets")
 def handle_ticket(
     ticket: Ticket,
+    request: Request,
     response: Response,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID"),
-    request_id: str = Header(default=None, alias="X-Request-ID"),
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    request_id: str | None = Header(default=None, alias="X-Request-ID"),
 ):
+    tenant_id = _resolve_request_tenant(request, tenant_id)
     request_id = request_id or new_request_id()
     idempotency_key = idempotency_key or str(uuid.uuid4())
     response.headers["X-Request-ID"] = request_id
@@ -105,10 +164,12 @@ def handle_ticket(
 
 @app.get("/tickets")
 def list_tickets(
-    tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID"),
+    request: Request,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     status: str | None = None,
     limit: int = 50,
 ):
+    tenant_id = _resolve_request_tenant(request, tenant_id)
     with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
             if not _tenant_exists(cur, tenant_id):
@@ -152,7 +213,12 @@ def list_tickets(
 
 
 @app.get("/tickets/{ticket_id}")
-def get_ticket(ticket_id: int, tenant_id: str = Header(default=DEFAULT_TENANT, alias="X-Tenant-ID")):
+def get_ticket(
+    ticket_id: int,
+    request: Request,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+):
+    tenant_id = _resolve_request_tenant(request, tenant_id)
     with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
             if not _tenant_exists(cur, tenant_id):
@@ -175,7 +241,14 @@ async def watch_ticket(websocket: WebSocket, ticket_id: int):
     # Browsers can't set custom headers on a WebSocket handshake (the JS WebSocket
     # constructor has no header API), so the browser UI passes ?tenant_id=... instead.
     # The header path stays first so scripts/watch_ticket.py keeps working unchanged.
-    tenant_id = websocket.headers.get("x-tenant-id") or websocket.query_params.get("tenant_id") or DEFAULT_TENANT
+    tenant_id = (
+        websocket.headers.get("x-tenant-id")
+        or websocket.query_params.get("tenant_id")
+    )
+    if not tenant_id:
+        await websocket.accept()
+        await websocket.close(code=4401, reason="missing tenant credentials")
+        return
     await websocket.accept()
 
     with get_connection(tenant_id) as conn:

@@ -3,6 +3,11 @@ spec has a real bug here (@shared_task async def never actually awaits), but
 it doesn't even apply to our code: the whole pipeline (embed_query,
 vector_search, keyword_search, rerank, the Groq call) has been synchronous
 since Phase 2, so there's no coroutine to run and no asyncio.run() needed."""
+import json
+import logging
+import os
+import time
+
 from app.db.session import get_connection
 from app.models import SupportResolution
 from app.pipeline import resolve_ticket
@@ -10,15 +15,47 @@ from app.realtime.pubsub import publish_ticket_update
 from app.tasks.celery_app import celery_app
 from app.telemetry.tracing import get_tracer, log_event, setup_tracing
 
+logger = logging.getLogger(__name__)
+
 setup_tracing("worker")
 tracer = get_tracer()
+
+
+def push_to_dlq(ticket_id: int, tenant_id: str, request_id: str, error: str, payload: dict | None = None) -> None:
+    """Record unrecoverable task failure into Dead Letter Queue for engineering inspection."""
+    try:
+        from app.realtime.pubsub import _ssl_kwargs
+        import redis
+
+        redis_url = os.environ.get("REDIS_URL")
+        if not redis_url:
+            return
+
+        client = redis.Redis.from_url(redis_url, **_ssl_kwargs())
+        try:
+            entry = {
+                "ticket_id": ticket_id,
+                "tenant_id": tenant_id,
+                "request_id": request_id,
+                "error": error,
+                "payload": payload,
+                "timestamp": time.time(),
+            }
+            client.lpush("tickets_dlq", json.dumps(entry))
+            client.ltrim("tickets_dlq", 0, 999)
+        finally:
+            client.close()
+    except Exception as dlq_err:
+        logger.error(f"Failed to record task {ticket_id} to tickets_dlq: {dlq_err}")
 
 
 @celery_app.task(
     bind=True,
     autoretry_for=(Exception,),
     max_retries=3,
-    default_retry_delay=60,
+    retry_backoff=True,
+    retry_backoff_max=180,
+    retry_jitter=True,
     time_limit=120,
 )
 def process_ticket(self, ticket_id: int, tenant_id: str, request_id: str):
@@ -50,8 +87,15 @@ def process_ticket(self, ticket_id: int, tenant_id: str, request_id: str):
             if self.request.retries < self.max_retries:
                 log_event("task_retrying", request_id, ticket_id=ticket_id, error=str(exc), retry=self.request.retries + 1)
                 raise
-            # If all retries are exhausted, gracefully escalate instead of leaving the ticket pending forever
+            # If all retries are exhausted, gracefully escalate and record to Dead Letter Queue
             log_event("task_exhausted_retries", request_id, ticket_id=ticket_id, error=str(exc))
+            push_to_dlq(
+                ticket_id=ticket_id,
+                tenant_id=tenant_id,
+                request_id=request_id,
+                error=str(exc),
+                payload={"subject": subject, "body": body},
+            )
             resolution = SupportResolution(
                 answer="We encountered a temporary processing issue with your request. It has been escalated directly to a human agent.",
                 citations=[],

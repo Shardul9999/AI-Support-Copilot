@@ -1,0 +1,79 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: copilot_redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  inference:
+    build:
+      context: ./docker/inference
+      dockerfile: Dockerfile
+    container_name: copilot_inference
+    ports:
+      - "8001:8001"
+    environment:
+      - RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+      - RERANK_DEVICE=cpu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copilot_api
+    depends_on:
+      redis:
+        condition: service_healthy
+      inference:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - RERANK_SERVICE_URL=http://inference:8001
+      - DB_POOL_MIN_SIZE=4
+      - DB_POOL_MAX_SIZE=20
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copilot_worker
+    depends_on:
+      redis:
+        condition: service_healthy
+      inference:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - RERANK_SERVICE_URL=http://inference:8001
+      - DB_POOL_MIN_SIZE=2
+      - DB_POOL_MAX_SIZE=10
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=4", "-Q", "tickets"]
+
+volumes:
+  redis_data:

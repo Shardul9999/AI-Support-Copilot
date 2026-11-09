@@ -11,7 +11,6 @@ _onnx_session = None
 _tokenizer = None
 ONNX_MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "models", "reranker_int8.onnx")
 
-
 def _get_onnx_session():
     """Lazy initialization of quantized INT8 ONNX Runtime inference session.
     Reduces memory from ~1GB to ~40MB and speeds up CPU inference ~3x."""
@@ -29,7 +28,6 @@ def _get_onnx_session():
             _onnx_session = None
     return _onnx_session, _tokenizer
 
-
 def _get_model():
     global _model
     if _model is None:
@@ -37,7 +35,6 @@ def _get_model():
 
         _model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", device="cpu")
     return _model
-
 
 def _remote_rerank(service_url: str, query: str, chunks: list[dict], top_k: int) -> list[dict] | None:
     try:
@@ -56,7 +53,6 @@ def _remote_rerank(service_url: str, query: str, chunks: list[dict], top_k: int)
         logger.warning(f"Remote rerank service ({service_url}) failed: {exc}. Falling back to local model.")
     return None
 
-
 def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
     """Reads query and chunk together in one pass (unlike vector/keyword search,
     which score each independently) — far more accurate, far too slow to run
@@ -73,7 +69,6 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
         if remote_result is not None:
             return remote_result
 
-    # 1. High-efficiency quantized ONNX Runtime (3x faster, ~40MB RAM)
     onnx_session, tokenizer = _get_onnx_session()
     if onnx_session is not None and tokenizer is not None:
         contents = [c["content"] for c in chunks]
@@ -94,7 +89,6 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
         ranked = sorted(zip(chunks, scores), key=lambda pair: pair[1], reverse=True)
         return [chunk for chunk, _ in ranked[:top_k]]
 
-    # 2. PyTorch CrossEncoder fallback
     model = _get_model()
     pairs = [(query, c["content"]) for c in chunks]
     scores = model.predict(pairs)

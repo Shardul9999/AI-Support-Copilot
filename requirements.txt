@@ -4,29 +4,22 @@ groq
 python-dotenv
 pydantic
 
-# Phase 2 — retrieval
 google-genai
 psycopg[binary,pool]
 pgvector
 tiktoken
 
-# Phase 3 — structured output
 instructor
 
-# Phase 4 — hybrid search + rerank
 sentence-transformers
 onnxruntime
 
-# Phase 5 — queue
 celery
 redis
 
-# Phase 6 — realtime delivery
 websockets
 
-# Phase 7 — multi-tenancy + RLS
 pytest
 
-# Phase 9 — observability + evals
 opentelemetry-api
 opentelemetry-sdk

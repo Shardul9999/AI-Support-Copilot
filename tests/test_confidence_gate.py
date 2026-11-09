@@ -7,7 +7,6 @@ load_dotenv()
 from app.models import SupportResolution
 from app.pipeline import CONFIDENCE_THRESHOLD, resolve_ticket
 
-
 @pytest.fixture
 def mock_pipeline_dependencies():
     with patch("app.pipeline.embed_query", return_value=[0.1] * 768), \
@@ -18,7 +17,6 @@ def mock_pipeline_dependencies():
          patch("app.pipeline.reciprocal_rank_fusion", return_value=[{"id": 1, "content": "policy chunk"}]), \
          patch("app.pipeline.rerank", return_value=[{"id": 1, "content": "policy chunk"}]):
         yield mock_cache_store
-
 
 def test_confidence_071_downgrades_to_escalate(mock_pipeline_dependencies):
     """0.71 is below the 0.72 threshold: forces downgrade to 'escalate' and blocks caching."""
@@ -38,7 +36,6 @@ def test_confidence_071_downgrades_to_escalate(mock_pipeline_dependencies):
     assert "below 0.72 threshold" in (res.escalation_reason or "")
     mock_cache_store.assert_not_called()
 
-
 def test_confidence_072_boundary_resolves(mock_pipeline_dependencies):
     """0.72 is exactly on the boundary: clears the threshold, remains 'resolve', and is cached."""
     mock_cache_store = mock_pipeline_dependencies
@@ -57,7 +54,6 @@ def test_confidence_072_boundary_resolves(mock_pipeline_dependencies):
     assert res.confidence == 0.72
     assert res.escalation_reason is None
     mock_cache_store.assert_called_once()
-
 
 def test_confidence_073_above_threshold_resolves(mock_pipeline_dependencies):
     """0.73 is strictly above the 0.72 threshold: remains 'resolve' and is cached."""

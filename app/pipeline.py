@@ -1,7 +1,3 @@
-"""The actual embed -> retrieve -> generate -> structured-output pipeline.
-Shared by app/main.py (was the whole endpoint through Phase 4) and
-app/tasks/process_ticket.py (Phase 5 onward) so there's exactly one place
-this logic lives, not one copy per caller."""
 import instructor
 from groq import Groq
 
@@ -13,12 +9,11 @@ from app.retrieval.keyword_search import keyword_search
 from app.retrieval.rerank import rerank
 from app.retrieval.vector_search import vector_search
 
-client = Groq()  # reads GROQ_API_KEY from env
+client = Groq()
 structured_client = instructor.from_groq(client, mode=instructor.Mode.TOOLS)
 
 MODEL = "openai/gpt-oss-120b"
 CONFIDENCE_THRESHOLD = 0.72
-
 
 def resolve_ticket(subject: str, body: str, tenant_id: str) -> SupportResolution:
     query = f"{subject}\n\n{body}"
@@ -54,13 +49,9 @@ def resolve_ticket(subject: str, body: str, tenant_id: str) -> SupportResolution
         ],
     )
 
-    # Citations are only trustworthy if they point at chunks we actually retrieved —
-    # a model can still name an id that wasn't in context.
     retrieved_ids = {c["id"] for c in chunks}
     resolution.citations = [cid for cid in resolution.citations if cid in retrieved_ids]
 
-    # Threshold is a safety net independent of the model's own judgment: even if it
-    # said "resolve", low self-reported confidence forces a human in the loop.
     if resolution.confidence < CONFIDENCE_THRESHOLD and resolution.action == "resolve":
         resolution.action = "escalate"
         resolution.escalation_reason = (
@@ -68,21 +59,12 @@ def resolve_ticket(subject: str, body: str, tenant_id: str) -> SupportResolution
             or f"Confidence {resolution.confidence:.2f} below {CONFIDENCE_THRESHOLD} threshold"
         )
 
-    # The model sometimes leaves `answer` empty when it escalates instead of resolving
-    # (defensible — it's declining to fabricate a substantive response) but an empty
-    # string is a worse customer-facing message than an honest holding reply.
     if resolution.action != "resolve" and not resolution.answer.strip():
         resolution.answer = (
             "Thanks for reaching out — this has been forwarded to a specialist "
             "who will follow up with you shortly."
         )
 
-    # Never cache an escalation/need_info or a low-confidence result: a false cache hit
-    # hands back a wrong answer with no model in the loop to catch it next time, so only
-    # results that already cleared the confidence bar above are eligible at all. (The
-    # action == "resolve" check is partly redundant with the override above — resolve
-    # implies confidence >= CONFIDENCE_THRESHOLD already — kept explicit anyway so this
-    # stays correct even if that override's logic ever changes independently.)
     if resolution.action == "resolve" and resolution.confidence >= CONFIDENCE_THRESHOLD:
         semantic_cache.store(query, query_embedding, tenant_id, resolution.model_dump())
 

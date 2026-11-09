@@ -2,7 +2,6 @@ import tiktoken
 
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 
-
 def chunk(text: str, size: int = 512, overlap: float = 0.1) -> list[str]:
     """Split text into ~`size`-token chunks with `overlap` fraction repeated
     between consecutive chunks, so a sentence split across a boundary still

@@ -1,11 +1,3 @@
-"""Phase 4 retrieval eval — compares vector-only top-5 against hybrid+rerank
-top-5 on a small labeled question set. Metric: precision@5 = fraction of
-questions where the expected source document appears in the top-5 results.
-Each doc in data/kb/ is currently exactly one chunk, so "expected source
-appears" is equivalent to "the right chunk was retrieved."
-
-Run from the repo root: python -m evals.retrieval_eval
-"""
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,7 +10,6 @@ from app.retrieval.vector_search import vector_search
 
 TENANT = "acme"
 
-# (question, expected source filename)
 QUESTIONS = [
     ("can I get my money back", "refund_policy.md"),
     ("error TXN_4471 on checkout", "error_codes.md"),
@@ -37,17 +28,14 @@ QUESTIONS = [
     ("customer wants to discuss legal action", "escalation_and_support.md"),
 ]
 
-
 def vector_only(query: str) -> list[dict]:
     return vector_search(embed_query(query), tenant_id=TENANT, top_k=5)
-
 
 def hybrid_reranked(query: str) -> list[dict]:
     semantic = vector_search(embed_query(query), tenant_id=TENANT, top_k=20)
     keyword = keyword_search(query, tenant_id=TENANT, top_k=20)
     fused = reciprocal_rank_fusion(semantic, keyword, top_k=20)
     return rerank(query, fused, top_k=5)
-
 
 def precision_at_k(method, k: int) -> tuple[int, int, list[str]]:
     hits = 0
@@ -61,12 +49,7 @@ def precision_at_k(method, k: int) -> tuple[int, int, list[str]]:
             misses.append(f"  MISS: '{question}' expected {expected_source}, got {sources}")
     return hits, len(QUESTIONS), misses
 
-
 if __name__ == "__main__":
-    # precision@5 is nearly unfalsifiable with only 6 total documents in the KB —
-    # top-5 out of ~6 candidates barely leaves room to fail. precision@1 (is the
-    # single best result actually correct) is the metric with real signal at this
-    # corpus size. Report both, but @5 is not the one to draw conclusions from yet.
     for k in (1, 5):
         print(f"=== Vector-only top-{k} ===")
         hits, total, misses = precision_at_k(vector_only, k)

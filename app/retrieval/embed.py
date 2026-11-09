@@ -6,8 +6,7 @@ from google.genai import types
 _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 MODEL = "models/gemini-embedding-001"
-DIMENSIONS = 768  # must match app/db/schema.sql's VECTOR(768)
-
+DIMENSIONS = 768
 
 def _embed(text: str, task_type: str) -> list[float]:
     result = _client.models.embed_content(
@@ -17,11 +16,9 @@ def _embed(text: str, task_type: str) -> list[float]:
     )
     return result.embeddings[0].values
 
-
 def embed_document(text: str) -> list[float]:
     """Embed a knowledge-base chunk, for storage."""
     return _embed(text, "RETRIEVAL_DOCUMENT")
-
 
 def embed_query(text: str) -> list[float]:
     """Embed an incoming ticket, for search. Gemini tunes the embedding

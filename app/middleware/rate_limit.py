@@ -24,12 +24,10 @@ EXEMPT_PREFIXES = (
 
 DEFAULT_RATE_LIMIT = int(os.environ.get("RATE_LIMIT_PER_MINUTE", 60))
 
-
 def _ssl_kwargs() -> dict:
     if os.environ.get("REDIS_URL", "").startswith("rediss://"):
         return {"ssl_cert_reqs": ssl.CERT_REQUIRED}
     return {}
-
 
 class RedisRateLimitMiddleware(BaseHTTPMiddleware):
     """Per-tenant sliding-window rate limiter powered by Redis.
@@ -76,14 +74,13 @@ class RedisRateLimitMiddleware(BaseHTTPMiddleware):
         if client is None:
             return await call_next(request)
 
-        # 60-second window bucket key
         current_minute = int(time.time() // 60)
         key = f"rate_limit:{tenant_id}:{current_minute}"
 
         try:
             pipe = client.pipeline()
             pipe.incr(key)
-            pipe.expire(key, 90)  # expires slightly after window ends
+            pipe.expire(key, 90)
             results = await pipe.execute()
             count = results[0]
 
@@ -108,6 +105,5 @@ class RedisRateLimitMiddleware(BaseHTTPMiddleware):
             return response
 
         except Exception as exc:
-            # Fail-open if Redis encounters connection or timeout issues
             logger.warning(f"Rate limiter failed open due to Redis error: {exc}")
             return await call_next(request)

@@ -1,23 +1,3 @@
-"""Comprehensive Retrieval Benchmark: Vector vs Keyword vs Hybrid + Reranking.
-
-Evaluates retrieval quality on a candidate pool of 200 chunks (destroying the ceiling effect):
-Metrics:
-- Hit@1 (Precision@1): Did the single top result match the ground truth?
-- Hit@3: Was the correct answer in the top 3?
-- Hit@5 (Precision@5): Was the correct answer in the top 5?
-- MRR (Mean Reciprocal Rank): 1/rank of the first relevant result.
-- Latency (ms): Average retrieval time per query.
-
-Usage:
-    # Run fast sample (default 25 questions, takes ~10s):
-    python -m evals.benchmark_retrieval
-
-    # Run complete 200-question suite:
-    python -m evals.benchmark_retrieval --all
-
-    # Run for a specific tenant (default: globex):
-    python -m evals.benchmark_retrieval --tenant globex
-"""
 import argparse
 import json
 import os
@@ -35,7 +15,6 @@ from app.retrieval.vector_search import vector_search
 
 EVAL_SET_PATH = os.path.join(os.path.dirname(__file__), "globex_eval_set.jsonl")
 
-
 def load_eval_cases(limit: int | None = None) -> list[dict]:
     if not os.path.exists(EVAL_SET_PATH):
         raise FileNotFoundError(f"Evaluation set {EVAL_SET_PATH} not found. Run scripts.ingest_faqs first.")
@@ -48,17 +27,12 @@ def load_eval_cases(limit: int | None = None) -> list[dict]:
                     break
     return cases
 
-
-# ---------------- Retrieval Methods ----------------
-
 def search_vector_only(query: str, tenant_id: str, top_k: int = 5) -> list[dict]:
     vec = embed_query(query)
     return vector_search(vec, tenant_id=tenant_id, top_k=top_k)
 
-
 def search_keyword_only(query: str, tenant_id: str, top_k: int = 5) -> list[dict]:
     return keyword_search(query, tenant_id=tenant_id, top_k=top_k)
-
 
 def search_hybrid_reranked(query: str, tenant_id: str, top_k: int = 5) -> list[dict]:
     vec = embed_query(query)
@@ -67,15 +41,10 @@ def search_hybrid_reranked(query: str, tenant_id: str, top_k: int = 5) -> list[d
     fused = reciprocal_rank_fusion(semantic, keyword, top_k=20)
     return rerank(query, fused, top_k=top_k)
 
-
-# ---------------- Evaluation Engine ----------------
-
 def is_hit(expected_answer: str, result_content: str) -> bool:
     """True if key terms from expected answer are present in the retrieved chunk."""
-    # Since chunk format is "Question: ...\nAnswer: ...", checking answer substring is exact
     expected_snippet = expected_answer.strip()[:60].lower()
     return expected_snippet in result_content.lower()
-
 
 def evaluate_method(method_fn, cases: list[dict], tenant_id: str, name: str) -> dict:
     hit_1 = 0
@@ -94,7 +63,6 @@ def evaluate_method(method_fn, cases: list[dict], tenant_id: str, name: str) -> 
         results = method_fn(q, tenant_id=tenant_id, top_k=5)
         latencies.append((time.perf_counter() - t0) * 1000)
 
-        # Find rank of ground truth
         rank = None
         for r_idx, res in enumerate(results):
             if is_hit(expected, res.get("content", "")):
@@ -121,7 +89,6 @@ def evaluate_method(method_fn, cases: list[dict], tenant_id: str, name: str) -> 
         "latency_ms": sum(latencies) / len(latencies),
     }
 
-
 def main():
     parser = argparse.ArgumentParser(description="Benchmark retrieval strategies against 200 candidate chunks.")
     parser.add_argument("--tenant", default="globex", help="Tenant to benchmark against (default: globex)")
@@ -147,7 +114,6 @@ def main():
         stats = evaluate_method(fn, cases, args.tenant, name)
         metrics.append(stats)
 
-    # Print Report Table
     print("\n" + "=" * 92)
     print(f"{'Method':<36} | {'Hit@1':<8} | {'Hit@3':<8} | {'Hit@5':<8} | {'MRR':<8} | {'Avg Latency'}")
     print("-" * 92)
@@ -158,11 +124,9 @@ def main():
         )
     print("=" * 92)
 
-    # Architectural takeaway
     best = max(metrics, key=lambda x: x["mrr"])
     print(f"\n Top Performing Strategy: {best['name']} (MRR: {best['mrr']:.3f})")
     print(" Ceilings eliminated: Metrics now reflect true discriminating ranking power across 200 candidates.\n")
-
 
 if __name__ == "__main__":
     main()

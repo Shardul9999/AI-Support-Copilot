@@ -1,11 +1,3 @@
-"""Export and quantize Cross-Encoder model to ONNX INT8 format.
-
-Usage:
-    ./venv/bin/python -m scripts.export_reranker_onnx
-
-Generates:
-    models/reranker_int8.onnx (~22 MB, 3x faster inference, ~40 MB RAM)
-"""
 import os
 import shutil
 import time
@@ -16,7 +8,6 @@ MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 ONNX_FP32_PATH = os.path.join(OUTPUT_DIR, "reranker.onnx")
 ONNX_INT8_PATH = os.path.join(OUTPUT_DIR, "reranker_int8.onnx")
-
 
 def export_and_quantize():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -52,7 +43,6 @@ def export_and_quantize():
         weight_type=QuantType.QInt8,
     )
 
-    # Clean up intermediate unquantized model to save disk space
     if os.path.exists(ONNX_FP32_PATH):
         os.remove(ONNX_FP32_PATH)
     extra_data = ONNX_FP32_PATH + ".data"
@@ -61,7 +51,6 @@ def export_and_quantize():
 
     size_mb = os.path.getsize(ONNX_INT8_PATH) / (1024 * 1024)
     print(f"✅ Successfully created {ONNX_INT8_PATH} ({size_mb:.1f} MB)")
-
 
 if __name__ == "__main__":
     export_and_quantize()

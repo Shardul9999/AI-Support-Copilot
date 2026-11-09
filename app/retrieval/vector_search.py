@@ -1,10 +1,7 @@
 from app.db.session import get_connection
 
-
 def vector_search(query_embedding: list[float], tenant_id: str, top_k: int = 5) -> list[dict]:
-    """Nearest-neighbour search over knowledge_chunks. tenant_id is required,
-    not optional — Phase 7 makes this storage-enforced via RLS, but the habit
-    of never calling this without a tenant starts now."""
+    """Nearest-neighbour search over knowledge_chunks scoped to tenant_id."""
     with get_connection(tenant_id) as conn:
         with conn.cursor() as cur:
             cur.execute(

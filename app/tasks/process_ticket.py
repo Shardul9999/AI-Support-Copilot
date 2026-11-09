@@ -1,8 +1,3 @@
-"""The Celery task. Deliberately a plain `def`, not `async def` — the guide's
-spec has a real bug here (@shared_task async def never actually awaits), but
-it doesn't even apply to our code: the whole pipeline (embed_query,
-vector_search, keyword_search, rerank, the Groq call) has been synchronous
-since Phase 2, so there's no coroutine to run and no asyncio.run() needed."""
 import json
 import logging
 import os
@@ -19,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 setup_tracing("worker")
 tracer = get_tracer()
-
 
 def push_to_dlq(ticket_id: int, tenant_id: str, request_id: str, error: str, payload: dict | None = None) -> None:
     """Record unrecoverable task failure into Dead Letter Queue for engineering inspection."""
@@ -48,7 +42,6 @@ def push_to_dlq(ticket_id: int, tenant_id: str, request_id: str, error: str, pay
     except Exception as dlq_err:
         logger.error(f"Failed to record task {ticket_id} to tickets_dlq: {dlq_err}")
 
-
 @celery_app.task(
     bind=True,
     autoretry_for=(Exception,),
@@ -65,10 +58,6 @@ def process_ticket(self, ticket_id: int, tenant_id: str, request_id: str):
         span.set_attribute("tenant_id", tenant_id)
         log_event("task_started", request_id, ticket_id=ticket_id, tenant_id=tenant_id)
 
-        # tenant_id comes from the caller (POST /tickets already resolved and validated
-        # it — see app/main.py), not a fresh lookup here: get_connection needs a tenant
-        # to scope its transaction *before* it can run any query at all under RLS, so
-        # there's no RLS-safe way to "look up the tenant" from an unscoped connection.
         with get_connection(tenant_id) as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -78,7 +67,7 @@ def process_ticket(self, ticket_id: int, tenant_id: str, request_id: str):
 
         if row is None:
             log_event("task_skipped_ghost_ticket", request_id, ticket_id=ticket_id)
-            return  # ticket vanished (or tenant mismatch) — nothing to do, don't retry forever on a ghost id
+            return
 
         subject, body = row
         try:
@@ -87,7 +76,6 @@ def process_ticket(self, ticket_id: int, tenant_id: str, request_id: str):
             if self.request.retries < self.max_retries:
                 log_event("task_retrying", request_id, ticket_id=ticket_id, error=str(exc), retry=self.request.retries + 1)
                 raise
-            # If all retries are exhausted, gracefully escalate and record to Dead Letter Queue
             log_event("task_exhausted_retries", request_id, ticket_id=ticket_id, error=str(exc))
             push_to_dlq(
                 ticket_id=ticket_id,

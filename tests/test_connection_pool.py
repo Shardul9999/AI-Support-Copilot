@@ -6,7 +6,6 @@ load_dotenv()
 
 from app.db.session import get_connection, get_app_pool, close_pools
 
-
 def test_pool_returns_clean_connection_on_reuse():
     """Verify that when a connection is returned to the pool, its tenant context
     is completely cleared so subsequent checkouts never inherit residual state."""
@@ -15,14 +14,12 @@ def test_pool_returns_clean_connection_on_reuse():
             cur.execute("SELECT current_setting('app.current_tenant', true)")
             assert cur.fetchone()[0] == "acme"
 
-    # Next checkout without tenant should have no residual tenant
     pool = get_app_pool()
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT current_setting('app.current_tenant', true)")
             val = cur.fetchone()[0]
             assert val is None or val == ""
-
 
 def test_concurrent_checkouts_isolate_tenants():
     """Verify concurrent threads checking out from the pool simultaneously

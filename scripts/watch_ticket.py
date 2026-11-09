@@ -1,15 +1,8 @@
-"""Demo CLI client for Phase 6: connects to the ticket websocket and prints
-whatever the server pushes, so a ticket's resolution can be watched live
-instead of polling GET /tickets/{id} in a loop.
-
-Usage: python -m scripts.watch_ticket <ticket_id> [ws://host:port] [tenant_id]
-"""
 import asyncio
 import json
 import sys
 
 import websockets
-
 
 async def watch(ticket_id: int, host: str, tenant_id: str) -> None:
     uri = f"{host}/ws/tickets/{ticket_id}"
@@ -23,7 +16,6 @@ async def watch(ticket_id: int, host: str, tenant_id: str) -> None:
             print(json.dumps(message, indent=2))
             if message.get("status") and message["status"] != "pending":
                 break
-
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

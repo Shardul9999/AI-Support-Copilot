@@ -1,4 +1,3 @@
-# app/main.py  —  pip install -r requirements.txt
 import asyncio
 import contextlib
 import json
@@ -8,7 +7,7 @@ import uuid
 
 from dotenv import load_dotenv
 
-load_dotenv()  # must run before any app-local import that reads env vars at module load time (embed.py, session.py)
+load_dotenv()
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -25,8 +24,7 @@ from app.telemetry.tracing import get_tracer, log_event, new_request_id, setup_t
 setup_tracing("api")
 tracer = get_tracer()
 
-HEARTBEAT_INTERVAL = 30  # seconds between pings while a ticket is still pending
-
+HEARTBEAT_INTERVAL = 30
 
 def _resolve_request_tenant(request: Request, header_tenant: str | None = None) -> str:
     """Resolve authenticated tenant_id from request state (set by TenantAuthMiddleware)
@@ -39,23 +37,15 @@ def _resolve_request_tenant(request: Request, header_tenant: str | None = None) 
         )
     return tenant_id
 
-
 async def _dispatch_update(payload: dict) -> None:
     await connections.dispatch_local(payload["ticket_id"], payload)
 
-
 def _tenant_exists(cur, tenant_id: str) -> bool:
-    # tenants has no RLS (it's the global tenant directory, not per-tenant data), so
-    # this is a plain lookup regardless of which tenant the connection's SET LOCAL used.
     cur.execute("SELECT 1 FROM tenants WHERE slug = %s", (tenant_id,))
     return cur.fetchone() is not None
 
-
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # One background subscriber per instance, started at startup — this is what makes
-    # a worker's publish() reach every instance, not just the one that happened to
-    # enqueue the ticket. See app/realtime/pubsub.py for why this exists.
     subscriber = asyncio.create_task(subscribe_forever(_dispatch_update))
     yield
     subscriber.cancel()
@@ -63,17 +53,14 @@ async def lifespan(app: FastAPI):
         await subscriber
     close_pools()
 
-
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(RedisRateLimitMiddleware)
 app.add_middleware(TenantAuthMiddleware)
-
 
 @app.get("/healthz")
 def healthz():
     """Liveness probe: verifies process is running and responding."""
     return {"status": "ok"}
-
 
 @app.get("/readyz")
 async def readyz():
@@ -107,7 +94,6 @@ async def readyz():
         media_type="application/json",
     )
 
-
 @app.post("/tickets")
 def handle_ticket(
     ticket: Ticket,
@@ -139,8 +125,6 @@ def handle_ticket(
                 existing = cur.fetchone()
 
                 if existing:
-                    # Same idempotency key seen before — a repeat webhook delivery.
-                    # Return the original result instead of re-queuing the work.
                     response.status_code = 200
                     return {"ticket_id": existing[0], "status": existing[1], "resolution": existing[2]}
 
@@ -160,7 +144,6 @@ def handle_ticket(
 
     response.status_code = 202
     return {"ticket_id": ticket_id, "status": "pending", "request_id": request_id}
-
 
 @app.get("/tickets")
 def list_tickets(
@@ -211,7 +194,6 @@ def list_tickets(
         for row in rows
     ]
 
-
 @app.get("/tickets/{ticket_id}")
 def get_ticket(
     ticket_id: int,
@@ -235,12 +217,8 @@ def get_ticket(
 
     return {"ticket_id": ticket_id, "status": row[0], "resolution": row[1]}
 
-
 @app.websocket("/ws/tickets/{ticket_id}")
 async def watch_ticket(websocket: WebSocket, ticket_id: int):
-    # Browsers can't set custom headers on a WebSocket handshake (the JS WebSocket
-    # constructor has no header API), so the browser UI passes ?tenant_id=... instead.
-    # The header path stays first so scripts/watch_ticket.py keeps working unchanged.
     tenant_id = (
         websocket.headers.get("x-tenant-id")
         or websocket.query_params.get("tenant_id")
@@ -272,9 +250,6 @@ async def watch_ticket(websocket: WebSocket, ticket_id: int):
 
     status, resolution = row
     if status != "pending":
-        # Already finished by the time the client connected (a real race — the worker
-        # can win it) — push the terminal state immediately rather than making the
-        # client wait for a pub/sub message that will never come.
         await queue.put({"ticket_id": ticket_id, "status": status, "resolution": resolution})
 
     try:
@@ -289,9 +264,6 @@ async def watch_ticket(websocket: WebSocket, ticket_id: int):
 
             if update in done:
                 message = update.result()
-                # request_id is only present on a genuine live pub/sub delivery (see
-                # app/tasks/process_ticket.py) — the "already resolved before connect"
-                # immediate-push path (below) has no live cross-process hop to trace.
                 if message.get("request_id"):
                     with tracer.start_as_current_span("websocket_push") as span:
                         span.set_attribute("request_id", message["request_id"])
@@ -299,27 +271,19 @@ async def watch_ticket(websocket: WebSocket, ticket_id: int):
                         log_event("websocket_push", message["request_id"], ticket_id=ticket_id, status=message.get("status"))
                 await websocket.send_json(message)
                 if message.get("status") != "pending":
-                    break  # terminal state delivered — this ticket has nothing further to push
+                    break
 
             if client_msg in done:
-                client_msg.result()  # raises WebSocketDisconnect if the client hung up; ignore any other content (pong/keepalive)
+                client_msg.result()
 
             if not done:
-                await websocket.send_json({"type": "ping"})  # heartbeat: nothing happened this interval
+                await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
         pass
     finally:
         connections.unregister(ticket_id, queue)
-        # The client may have already disconnected by the time we get here (e.g. it hung up
-        # right as we delivered the terminal update) — Starlette raises RuntimeError if the
-        # connection was never accepted-and-open, WebSocketDisconnect if it's accepted but the
-        # client is already gone. Either way, closing an already-gone connection isn't an error.
         with contextlib.suppress(RuntimeError, WebSocketDisconnect):
             await websocket.close()
 
-
-# Mounted last so it can never shadow an API route. Serving the UI from the API's own
-# origin keeps fetch() and the websocket same-origin, so no CORS config is needed.
-# Path is resolved from this file, not the cwd, so it works wherever uvicorn is started.
 _FRONTEND_DIR = pathlib.Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/ui", StaticFiles(directory=_FRONTEND_DIR, html=True), name="ui")

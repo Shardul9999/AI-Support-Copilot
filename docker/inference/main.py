@@ -12,17 +12,14 @@ print(f"Loading CrossEncoder model {MODEL_NAME} on {DEVICE}...")
 model = CrossEncoder(MODEL_NAME, device=DEVICE)
 print("Model loaded successfully.")
 
-
 class RerankRequest(BaseModel):
     query: str
     chunks: list[dict]
     top_k: int = 5
 
-
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "model": MODEL_NAME}
-
 
 @app.post("/rerank")
 def rerank_endpoint(request: RerankRequest):

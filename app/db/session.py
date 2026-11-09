@@ -13,7 +13,6 @@ load_dotenv()
 _app_pool: ConnectionPool | None = None
 _pool_lock = threading.Lock()
 
-
 def _reset_connection_state(conn: psycopg.Connection) -> None:
     """Reset session state before returning a connection to the pool.
     Guarantees no tenant context, temporary state, or open transaction
@@ -21,10 +20,8 @@ def _reset_connection_state(conn: psycopg.Connection) -> None:
     if conn.info.transaction_status != psycopg.pq.TransactionStatus.IDLE:
         conn.rollback()
     with conn.cursor() as cur:
-        # Reset current tenant setting to empty so next checkout fails closed
         cur.execute("SELECT set_config('app.current_tenant', '', false)")
     conn.commit()
-
 
 def get_app_pool() -> ConnectionPool:
     """Lazy thread-safe initialization of the psycopg connection pool for app_role."""
@@ -43,7 +40,6 @@ def get_app_pool() -> ConnectionPool:
                 )
     return _app_pool
 
-
 def close_pools() -> None:
     """Drain and close all active database pools. Called during application shutdown."""
     global _app_pool
@@ -51,7 +47,6 @@ def close_pools() -> None:
         if _app_pool is not None and not _app_pool.closed:
             _app_pool.close()
             _app_pool = None
-
 
 @contextlib.contextmanager
 def get_connection(tenant_id: str) -> Generator[psycopg.Connection, None, None]:
@@ -66,13 +61,8 @@ def get_connection(tenant_id: str) -> Generator[psycopg.Connection, None, None]:
     pool = get_app_pool()
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            # set_config(..., is_local=true) is SET LOCAL's parameterized equivalent —
-            # plain `SET LOCAL app.current_tenant = %s` fails: Postgres's SET command
-            # only accepts a literal there, not a bind parameter (confirmed live:
-            # "syntax error at or near '$1'" under the extended query protocol).
             cur.execute("SELECT set_config('app.current_tenant', %s, true)", (tenant_id,))
         yield conn
-
 
 def get_admin_connection() -> psycopg.Connection:
     """Unrestricted connection for schema/migration/ingestion scripts only —

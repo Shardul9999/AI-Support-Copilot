@@ -1,18 +1,3 @@
-"""Ingest Hugging Face Customer Support FAQs into knowledge_chunks.
-
-Provides corpus scaling for evaluation:
-- Globex tenant gets all 200 FAQs (acts as the large-scale benchmark tenant).
-- Acme tenant gets the 161 clean, non-conflicting FAQs as distractors
-  (excluding the 39 that collide with Acme's refund window, shipping to Nepal, etc.).
-
-Usage:
-    # Ingest for both tenants (recommended):
-    python -m scripts.ingest_faqs
-
-    # Or ingest for a specific tenant:
-    python -m scripts.ingest_faqs --tenant globex
-    python -m scripts.ingest_faqs --tenant acme
-"""
 import argparse
 import json
 import os
@@ -29,14 +14,11 @@ from app.retrieval.embed import embed_document
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "hf_faqs_raw.json")
 EVAL_SET_PATH = os.path.join(os.path.dirname(__file__), "..", "evals", "globex_eval_set.jsonl")
 
-# Topics that directly contradict Acme's specific policies:
-# (14-day refund window, India-only shipping, store credit for clearance, etc.)
 CONTRADICTION_KEYWORDS = [
     "refund", "return", "shipping", "international", "nepal",
     "delivery", "payment", "paypal", "cash on delivery", "cod",
     "final sale"
 ]
-
 
 def load_raw_faqs() -> list[dict]:
     if not os.path.exists(DATA_PATH):
@@ -46,7 +28,6 @@ def load_raw_faqs() -> list[dict]:
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def filter_safe_for_acme(items: list[dict]) -> list[dict]:
     safe = []
     for item in items:
@@ -55,7 +36,6 @@ def filter_safe_for_acme(items: list[dict]) -> list[dict]:
         if not any(k in q or k in a for k in CONTRADICTION_KEYWORDS):
             safe.append(item)
     return safe
-
 
 def export_globex_eval_set(items: list[dict]):
     """Exports questions and answers as an evaluation test set for Globex."""
@@ -71,7 +51,6 @@ def export_globex_eval_set(items: list[dict]):
             f.write(json.dumps(record) + "\n")
     print(f"Exported {len(items)} evaluation cases to {EVAL_SET_PATH}")
 
-
 def ingest_tenant(tenant_id: str, items: list[dict]):
     print(f"\n==========================================")
     print(f"Starting ingestion for tenant: [{tenant_id}] ({len(items)} FAQs)")
@@ -80,18 +59,15 @@ def ingest_tenant(tenant_id: str, items: list[dict]):
     conn = get_admin_connection()
     with conn:
         with conn.cursor() as cur:
-            # Clean only previous HF FAQ chunks for this tenant, preserving core Acme policy docs
             cur.execute(
                 "DELETE FROM knowledge_chunks WHERE tenant_id = %s AND source = 'faq_dataset_huggingface'",
                 (tenant_id,),
             )
-            # Invalidate semantic cache for this tenant so no stale cache hits occur
             cur.execute("DELETE FROM semantic_cache WHERE tenant_id = %s", (tenant_id,))
 
             for i, item in enumerate(items):
                 content = f"Question: {item['question']}\nAnswer: {item['answer']}"
                 
-                # Rate limit safety: slight pause every 15 items if needed
                 if i > 0 and i % 15 == 0:
                     time.sleep(0.5)
 
@@ -108,7 +84,6 @@ def ingest_tenant(tenant_id: str, items: list[dict]):
 
     print(f"Successfully finished ingestion for [{tenant_id}].")
 
-
 def main():
     parser = argparse.ArgumentParser(description="Ingest Hugging Face FAQs into knowledge_chunks.")
     parser.add_argument(
@@ -122,20 +97,16 @@ def main():
     items = load_raw_faqs()
     print(f"Loaded {len(items)} total FAQs from {DATA_PATH}")
 
-    # Generate the eval set for globex
     export_globex_eval_set(items)
 
     if args.tenant in ("globex", "both"):
-        # Globex receives all 200 items (200-item benchmark tenant)
         ingest_tenant("globex", items)
 
     if args.tenant in ("acme", "both"):
-        # Acme receives only the 161 non-conflicting items as distractors
         safe_items = filter_safe_for_acme(items)
         ingest_tenant("acme", safe_items)
 
     print("\n All tasks completed successfully.")
-
 
 if __name__ == "__main__":
     main()

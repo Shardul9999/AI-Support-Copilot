@@ -1,11 +1,3 @@
-"""Phase 2 ingestion: reads data/kb/*.md, chunks each file, embeds each chunk
-via Gemini, inserts into knowledge_chunks. Re-run whenever the doc set changes
-(wipes and reloads for now). Also wipes semantic_cache (Phase 8) — any cached
-resolution could have been generated from a document version that no longer
-exists, so a KB reload has to invalidate the whole cache, not just the KB.
-
-Run from the repo root: python -m scripts.ingest
-"""
 import glob
 import os
 
@@ -19,11 +11,7 @@ from app.retrieval.embed import embed_document
 
 DOCS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "kb")
 
-
 def ingest():
-    # Admin connection, not the restricted app_role: ingestion is a trusted
-    # operator action (loading the KB), not a request-serving path, so RLS's
-    # per-tenant enforcement isn't the relevant concern here (see DECISIONS.md).
     conn = get_admin_connection()
     with conn:
         with conn.cursor() as cur:
@@ -46,7 +34,6 @@ def ingest():
                     total += 1
                 print(f"{source}: {len(pieces)} chunks")
     print(f"Ingested {total} chunks total")
-
 
 if __name__ == "__main__":
     ingest()

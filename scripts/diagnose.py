@@ -1,12 +1,3 @@
-"""Diagnostic script to verify all connections and prerequisites for AI Support Copilot.
-
-Checks:
-1. DATABASE_URL (admin connection & tables)
-2. APP_DATABASE_URL (RLS restricted role & permissions)
-3. REDIS_URL (Celery broker / Upstash Redis connection)
-4. GEMINI_API_KEY (embedding API)
-5. GROQ_API_KEY (LLM inference API)
-"""
 import os
 import ssl
 import sys
@@ -15,10 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 def check_mark(ok: bool) -> str:
     return "\033[92m[PASS]\033[0m" if ok else "\033[91m[FAIL]\033[0m"
-
 
 def run_diagnostics():
     print("=" * 60)
@@ -27,7 +16,6 @@ def run_diagnostics():
 
     all_passed = True
 
-    # 1. Admin Postgres connection
     print("\n1. Checking DATABASE_URL (Admin Database Connection)...")
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -43,7 +31,6 @@ def run_diagnostics():
                     ver = cur.fetchone()[0]
                     print(f" {check_mark(True)} Connected to Postgres: {ver.split(',')[0]}")
 
-                    # Check tables
                     cur.execute("""
                         SELECT table_name FROM information_schema.tables 
                         WHERE table_schema = 'public' 
@@ -58,7 +45,6 @@ def run_diagnostics():
                     else:
                         print(f" {check_mark(True)} All required tables exist: {required_tables}")
 
-                    # Check tenant seeds
                     cur.execute("SELECT slug FROM tenants;")
                     tenants = [row[0] for row in cur.fetchall()]
                     print(f" {check_mark(True)} Seeded tenants: {tenants}")
@@ -67,7 +53,6 @@ def run_diagnostics():
             print(f" {check_mark(False)} Admin Postgres connection failed: {e}")
             all_passed = False
 
-    # 2. App Role Postgres connection
     print("\n2. Checking APP_DATABASE_URL (Restricted App Role & RLS)...")
     app_url = os.environ.get("APP_DATABASE_URL")
     if not app_url:
@@ -90,7 +75,6 @@ def run_diagnostics():
             print("  -> Hint: Re-run `python -m scripts.setup_app_role` to regenerate app_role credentials.")
             all_passed = False
 
-    # 3. Redis connection
     print("\n3. Checking REDIS_URL (Celery Broker / PubSub)...")
     redis_url = os.environ.get("REDIS_URL")
     if not redis_url:
@@ -110,7 +94,6 @@ def run_diagnostics():
             print("  -> Hint: Check your REDIS_URL in .env or check if Upstash Redis database is active.")
             all_passed = False
 
-    # 4. Gemini API Key
     print("\n4. Checking GEMINI_API_KEY...")
     gemini_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_key:
@@ -132,7 +115,6 @@ def run_diagnostics():
             print(f" {check_mark(False)} Gemini embedding failed: {e}")
             all_passed = False
 
-    # 5. Groq API Key
     print("\n5. Checking GROQ_API_KEY...")
     groq_key = os.environ.get("GROQ_API_KEY")
     if not groq_key:
@@ -155,7 +137,6 @@ def run_diagnostics():
     else:
         print("\033[91mSOME CHECKS FAILED.\033[0m Review the error messages above.")
     print("=" * 60)
-
 
 if __name__ == "__main__":
     run_diagnostics()

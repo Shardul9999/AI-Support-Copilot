@@ -38,7 +38,6 @@ tailwind.config={darkMode:"class",theme:{extend:{
 </head>
 <body class="bg-background font-body-md text-on-surface">
 
-<!-- ─────────── SIDEBAR ─────────── -->
 <aside class="fixed left-0 top-0 h-full w-[240px] bg-background border-r border-surface-raised z-50 flex flex-col justify-between">
   <div class="flex flex-col">
     <div class="px-lg pt-lg mb-xl">
@@ -69,7 +68,7 @@ tailwind.config={darkMode:"class",theme:{extend:{
 </aside>
 
 <div class="pl-[240px]">
-  <!-- ─────────── HEADER ─────────── -->
+  
   <header class="fixed top-0 left-[240px] right-0 h-[56px] bg-background border-b border-surface-raised z-40 flex items-center justify-between px-lg">
     <div class="relative">
       <button id="tenant-btn" class="flex items-center gap-xs px-sm py-1 bg-surface-raised rounded border border-surface-variant cursor-pointer hover:border-primary transition-colors">
@@ -92,11 +91,11 @@ tailwind.config={darkMode:"class",theme:{extend:{
 
   <main class="pt-[56px] h-screen">
 
-  <!-- ═══════════ VIEW: SUBMIT ═══════════ -->
+  
   <section id="view-submit" class="h-[calc(100vh-56px)] p-lg">
     <div class="flex flex-col lg:flex-row h-full gap-lg">
 
-      <!-- Left: form -->
+      
       <div class="w-full lg:w-[40%] flex flex-col">
         <div class="bg-[#0F172A] rounded p-lg flex flex-col gap-lg flex-grow min-h-0">
           <div class="flex flex-col gap-xs">
@@ -128,7 +127,7 @@ tailwind.config={darkMode:"class",theme:{extend:{
         </div>
       </div>
 
-      <!-- Right: live resolution -->
+      
       <div class="w-full lg:w-[60%] flex flex-col min-h-0">
         <div id="res-card" class="bg-[#0F172A] rounded flex flex-col h-full relative overflow-hidden">
           <div id="res-accent" class="absolute left-0 top-0 bottom-0 w-[2px] bg-surface-raised"></div>
@@ -151,7 +150,7 @@ tailwind.config={darkMode:"class",theme:{extend:{
     </div>
   </section>
 
-  <!-- ═══════════ VIEW: QUEUE ═══════════ -->
+  
   <section id="view-queue" class="hidden h-[calc(100vh-56px)] flex-col">
     <div class="px-md py-sm flex items-center justify-between border-b border-surface-raised flex-shrink-0">
       <div id="filters" class="flex items-center gap-xs overflow-x-auto">
@@ -187,7 +186,7 @@ tailwind.config={darkMode:"class",theme:{extend:{
         </div>
       </div>
 
-      <!-- Detail drawer -->
+      
       <div id="drawer" class="w-[480px] bg-surface-container border-l border-surface-raised flex-shrink-0 transition-transform duration-300 transform translate-x-full absolute right-0 top-0 bottom-0 z-20 flex flex-col shadow-xl">
         <div id="drawer-head" class="p-lg border-b border-surface-raised flex items-start justify-between bg-surface-container-highest relative overflow-hidden"></div>
         <div id="drawer-body" class="flex-1 overflow-y-auto p-lg flex flex-col gap-lg"></div>
@@ -272,8 +271,6 @@ function badgeHTML(status) {
             <span class="font-data-mono text-status-label text-${m.color}">${m.label}</span></div>`;
 }
 
-// Confidence meter with the 0.72 auto-resolve threshold tick — the single most
-// important element in this UI: it shows *why* a verdict came out the way it did.
 function meterHTML(confidence, status) {
   const pct = Math.round(confidence * 100);
   const m = meta(status);
@@ -437,12 +434,9 @@ async function submitTicket(reuseKey) {
     $("resend-btn").disabled = false;
 
     if (status === 200 && data.status === "pending") {
-      // Idempotent replay, but the original is still being worked on — watch it rather
-      // than rendering an empty resolution card.
       renderPending(data.ticket_id, null);
       watch(data.ticket_id, null);
     } else if (status === 200) {
-      // Idempotent replay — server returned the original result without re-queuing.
       renderResolution(data.ticket_id, data.status, data.resolution, null, true);
     } else {
       renderPending(data.ticket_id, data.request_id);
@@ -462,7 +456,6 @@ async function submitTicket(reuseKey) {
 function rowHTML(t) {
   const m = meta(t.status);
   const conf = t.resolution && typeof t.resolution.confidence === "number" ? t.resolution.confidence : null;
-  // A pending ticket has resolution = NULL — there is no confidence yet, so show an em-dash.
   const confCell = conf === null
     ? `<span class="font-data-mono text-text-muted">—</span>`
     : `<div class="flex items-center justify-end gap-2">
@@ -494,7 +487,6 @@ async function loadTickets() {
     state.tickets = [];
   }
 
-  // Sidebar counts come from the real list, not invented numbers.
   const by = (s) => state.tickets.filter(t => t.status === s).length;
   $("count-pending").textContent   = by("pending");
   $("count-resolved").textContent  = by("resolve");
@@ -511,8 +503,6 @@ async function openDrawer(ticketId) {
   const t = state.tickets.find(x => String(x.ticket_id) === String(ticketId));
   if (!t) return;
 
-  // A row cached as pending may have finished since the list was fetched — re-check
-  // the single ticket so the drawer never shows a stale "still processing".
   if (t.status === "pending") {
     try {
       const { data } = await api(`/tickets/${encodeURIComponent(ticketId)}`);
@@ -612,7 +602,6 @@ document.querySelectorAll(".tenant-opt").forEach(btn =>
     state.tenantName = btn.dataset.name;
     $("tenant-label").textContent = state.tenantName;
     $("tenant-menu").classList.add("hidden");
-    // Switching tenants resets the whole workspace — nothing crosses the boundary.
     if (state.ws) { try { state.ws.close(); } catch {} state.ws = null; }
     state.lastKey = null; $("resend-btn").disabled = true;
     closeDrawer(); resetResolution(); loadTickets();
